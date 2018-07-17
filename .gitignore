@@ -5,6 +5,7 @@
 *.pkl
 *.csv
 *.log
+*.swo
 
 test.py
 backtest.py

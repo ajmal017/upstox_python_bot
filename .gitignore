@@ -1,0 +1,12 @@
+*.pyc
+*.swp
+*.ini
+*.txt
+*.pkl
+*.csv
+*.log
+
+test.py
+backtest.py
+__pycache__/
+ohlc/

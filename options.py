@@ -1,16 +1,16 @@
 from upstox_api import api
 import utils
-import threading
 from time import sleep
 from math import sqrt
 from datetime import date
+from bot import TradeBot
 
 N50_SYMBOL = 'NIFTY_50'
 LOT_SIZE = 75
 NUM_LOTS = 10
 
 
-class Gann:
+class Gann(TradeBot):
     def __init__(self, client):
         if not isinstance(client, api.Upstox):
             print('Provide an Upstox class object for gann.client')
@@ -18,9 +18,9 @@ class Gann:
         else:
             self.client = client
 
-        self.lock = threading.Lock()
         self.running = False
         self.messages = None
+        self.activity = []
 
         self.gann_angles = (0.02, 0.04, 0.08, 0.1, 0.15, 0.25, 0.35,
                             0.40, 0.42, 0.46, 0.48, 0.5, 0.67, 1.0)
@@ -45,7 +45,6 @@ class Gann:
         self.ce_buy_oid = 0
         self.ce_sell_oid = 0
 
-        self.activity = []
 
     def setup(self, message_queue=None):
         if 'initialised' in self.activity and self.messages is not None:

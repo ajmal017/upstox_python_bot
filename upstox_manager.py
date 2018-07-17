@@ -1,22 +1,17 @@
 import os
-import threading
+from threading import Thread
 import configparser
 from queue import Queue
 from time import sleep
 from datetime import date, datetime, timedelta
 from upstox_api import api
 
+import utils
 from options import Gann
-
-MAX_LOGIN_TRIES = 10
-
-TRADE_OPEN = datetime.strptime(date.today().strftime('%d-%m-%y') + '-09:16',
-                               '%d-%m-%y-%H:%M')
-TRADE_CUTOFF = datetime.strptime(date.today().strftime('%d-%m-%y') + '-15:15',
-                                 '%d-%m-%y-%H:%M')
+from moving_avg import EMAOption
 
 
-class Upstox_Manager():
+class Upstox_Manager(Thread):
 
     def __init__(self, config_name):
         if '.ini' not in config_name.lower():
@@ -31,13 +26,11 @@ class Upstox_Manager():
         self.config.read(config_name)
 
         self.client = None
-        self.workers = []
-        self.queues = {}
-        self.threads = []
+        self.bots = []
+        self.worker_queues = {}
 
         self.subbed_stocks = []
         self.running = False
-        self.lock = threading.Lock()
 
     def create_config_file(self):
         conf = configparser.ConfigParser()
@@ -84,6 +77,21 @@ class Upstox_Manager():
             print(e)
             return
 
+        try:
+            nse_fo = self.client.get_master_contract('nse_fo')
+            if nse_fo:
+                print('Loaded NSE F&O master contracts.')
+        except Exception as e:
+            print('unable to load NSE_FO master contracts')
+            print(e)
+        try:
+            self.client.enabled_exchanges.append('nse_index')
+            nse_index = self.client.get_master_contract('nse_index')
+            if nse_index:
+                print('Loaded NSE Index master contracts.')
+        except Exception as e:
+            print('unable to load NSE_INDEX master contracts')
+
         self.client.set_on_quote_update(self.quote_handler)
         self.client.set_on_order_update(self.order_handler)
         self.client.set_on_trade_update(self.trade_handler)
@@ -100,33 +108,28 @@ class Upstox_Manager():
 
         q = Queue()
         syms = worker.setup(q)
-        print('\n------------')
-        print(syms)
         if type(syms) is tuple:
-            self.queues[syms] = q
+            self.worker_queues[syms] = q
         else:
-            self.queues[(syms, )] = q
+            self.worker_queues[(syms, )] = q
 
-        self.workers.append(worker)
-        self.threads.append(threading.Thread(target=worker.run, daemon=True))
-
+        self.bots.append(worker)
 
     def run(self):
-        for t in self.threads:
-            t.start()
-
         try:
             while 1:
-                if datetime.now() < TRADE_OPEN:
+                if datetime.now() < utils.TRADE_OPEN:
                     print('\nWaiting for trade hours to start')
                     sleep(10)
-                elif datetime.now() > TRADE_CUTOFF:
+                elif datetime.now() > utils.TRADE_CUTOFF:
                     print('\nCutoff time reached. Close all positions')
                     self.stop()
                     break
                 elif not self.running:
                     self.client.start_websocket(True)
                     self.running = True
+                    for t in self.bots:
+                        t.start()
                 else:
                     sleep(1)
         except Exception as e:
@@ -138,9 +141,9 @@ class Upstox_Manager():
             self.subbed_stocks.append(message['instrument'])
 
         try:
-            for k, w in self.queues.items():
+            for k, w in self.worker_queues.items():
                 if sym in k:
-                    self.queues[k].put(('q', message))
+                    self.worker_queues[k].put(('q', message))
         except Exception as e:
             print('No workers for Symbol %s. Unsubscribing instrument.' % sym)
             try:
@@ -152,9 +155,9 @@ class Upstox_Manager():
     def order_handler(self, message):
         sym = message['instrument'].symbol.lower()
         try:
-            for k, w in self.queues.items():
+            for k, w in self.worker_queues.items():
                 if sym in k:
-                    self.queues[k].put(('o', message))
+                    self.worker_queues[k].put(('o', message))
         except Exception as e:
             print('No workers for Symbol %s. Unsubscribing instrument.' % sym)
             try:
@@ -166,9 +169,9 @@ class Upstox_Manager():
     def trade_handler(self, message):
         sym = message['instrument'].symbol.lower()
         try:
-            for k, w in self.queues.items():
+            for k, w in self.worker_queues.items():
                 if sym in k:
-                    self.queues[k].put(('t', message))
+                    self.worker_queues[k].put(('t', message))
         except Exception as e:
             print('No workers for Symbol %s. Unsubscribing instrument.' % sym)
             try:
@@ -179,9 +182,6 @@ class Upstox_Manager():
     def stop(self):
         for w in self.workers:
             w.stop()
-
-        for t in self.threads:
-            t.join()
 
         for stock in self.subbed_stocks:
             try:
@@ -196,11 +196,14 @@ class Upstox_Manager():
 def main():
     m = Upstox_Manager('config.ini')
     m.login_upstox()
-    g = Gann(m.client)
-    m.add_worker(g)
-    m.run()
 
-    input('Press Enter to close program')
+    # g = Gann(m.client)
+    # m.add_worker(g)
+
+    e = EMAOption(m.client)
+    m.add_worker(e)
+
+    # m.run()
 
 
 if __name__ == '__main__':

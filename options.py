@@ -173,6 +173,7 @@ class Gann(Thread):
     def process_trade(self, message):
         sym = message['symbol'].lower()
         qty = int(message['traded_quantity'])
+        qty = int(message['quantity'])
         oid = str(message['order_id'])
         tt = str(message['transaction_type'])
         atp = float(message['average_price'])

@@ -5,10 +5,11 @@ FREQ = 5.0
 
 
 class TradeBot(Thread):
-    client = None
-    running = False
     messages = None
-    activity = []
+    running = False
+
+    def __init__(self):
+        super().__init__()
 
     def setup(self, message_queue):
         self.messages = message_queue
@@ -37,4 +38,4 @@ class TradeBot(Thread):
         pass
 
     def stop(self):
-        pass
+        self.running = False

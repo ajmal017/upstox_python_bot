@@ -3,20 +3,20 @@ import threading
 import configparser
 from queue import Queue
 from time import sleep
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from upstox_api import api
 
 from options import Gann
 
 MAX_LOGIN_TRIES = 10
 
-TRADE_OPEN = datetime.strptime(date.today().strftime('%d-%m-%y') + '-09:16',
+TRADE_OPEN = datetime.strptime(date.today().strftime('%d-%m-%y') + '-09:15',
                                '%d-%m-%y-%H:%M')
 TRADE_CUTOFF = datetime.strptime(date.today().strftime('%d-%m-%y') + '-15:15',
                                  '%d-%m-%y-%H:%M')
 
 
-class Upstox_Manager():
+class Upstox_Manager:
 
     def __init__(self, config_name):
         if '.ini' not in config_name.lower():
@@ -55,41 +55,49 @@ class Upstox_Manager():
         if creds['secret'] == '0':
             creds['secret'] = input('Please enter the API secret - ')
 
+        tries = 0
         s = api.Session(creds['key'])
         s.set_redirect_uri('http://127.0.0.1')
         s.set_api_secret(creds['secret'])
-        diff = None
+        while tries < MAX_LOGIN_TRIES:
+            try:
+                self.client = api.Upstox(creds['key'], creds['token'])
+                print('Logged in successfully.')
+                break
+            except Exception as e:
+                print(e.args)
+                if 'Invalid Bearer token' in e.args[0]:
+                    url = s.get_login_url()
+                    print('New token required. Auth url - ')
+                    print(url)
+                    code = input("Please enter the code from the login page - ")
+                    s.set_code(code)
+                    creds['token'] = s.retrieve_access_token()
+            tries += 1
 
-        if creds['last_login'] == '0':
-            diff = timedelta(hours=1)
-        else:
-            now = datetime.now()
-            last = datetime.strptime(creds['last_login'], '%d-%m-%Y %H:%M')
-            diff = now - last
-
-        if creds['token'] == '0' or diff > timedelta(hours=11, minutes=59):
-            url = s.get_login_url()
-            print('Auth url - ')
-            print(url)
-            code = input("Please enter the code from the login page - ")
-            s.set_code(code)
-            creds['token'] = s.retrieve_access_token()
-        else:
-            print('Reusing token - ', creds['token'])
-        try:
-            self.client = api.Upstox(creds['key'], creds['token'])
-            print('Logged in successfully.')
-        except Exception as e:
-            print('ERROR! Unable to start Upstox client.')
-            print(e)
+        if self.client is None:
             return
+
+        try:
+            nse_fo = self.client.get_master_contract('nse_fo')
+            if nse_fo:
+                print('Loaded NSE F&O master contracts.')
+        except Exception as e:
+            print('unable to load NSE_FO master contracts')
+            print(e)
+        try:
+            self.client.enabled_exchanges.append('nse_index')
+            nse_index = self.client.get_master_contract('nse_index')
+            if nse_index:
+                print('Loaded NSE Index master contracts.')
+        except Exception as e:
+            print('unable to load NSE_INDEX master contracts')
 
         self.client.set_on_quote_update(self.quote_handler)
         self.client.set_on_order_update(self.order_handler)
         self.client.set_on_trade_update(self.trade_handler)
 
         creds['last_login'] = datetime.now().strftime('%d-%m-%Y %H:%M')
-
         with open(self.config_name, 'w') as cf:
             self.config.write(cf)
 
@@ -100,37 +108,38 @@ class Upstox_Manager():
 
         q = Queue()
         syms = worker.setup(q)
-        print('\n------------')
-        print(syms)
         if type(syms) is tuple:
             self.queues[syms] = q
+        elif type(syms) is list:
+            self.queues[tuple(syms)] = q
         else:
             self.queues[(syms, )] = q
 
-        self.workers.append(worker)
-        self.threads.append(threading.Thread(target=worker.run, daemon=True))
-
+        self.threads.append(worker)
 
     def run(self):
-        for t in self.threads:
-            t.start()
-
-        try:
-            while 1:
+        while 1:
+            try:
                 if datetime.now() < TRADE_OPEN:
                     print('\nWaiting for trade hours to start')
                     sleep(10)
                 elif datetime.now() > TRADE_CUTOFF:
                     print('\nCutoff time reached. Close all positions')
                     self.stop()
-                    break
                 elif not self.running:
+                    print('\nStarting bots...')
                     self.client.start_websocket(True)
                     self.running = True
+                    for t in self.threads:
+                        t.start()
                 else:
                     sleep(1)
-        except Exception as e:
-            self.stop()
+            except KeyboardInterrupt:
+                self.stop()
+            except Exception as e:
+                print('\n-------------------')
+                print(e)
+                pass
 
     def quote_handler(self, message):
         sym = message['instrument'].symbol.lower()
@@ -142,12 +151,7 @@ class Upstox_Manager():
                 if sym in k:
                     self.queues[k].put(('q', message))
         except Exception as e:
-            print('No workers for Symbol %s. Unsubscribing instrument.' % sym)
-            try:
-                self.client.unsubscribe(message['instrument'], api.LiveFeedType.LTP)
-            except Exception as e:
-                pass
-            pass
+            print('No workers for Symbol %s.' % sym)
 
     def order_handler(self, message):
         sym = message['instrument'].symbol.lower()
@@ -200,7 +204,35 @@ def main():
     m.add_worker(g)
     m.run()
 
-    input('Press Enter to close program')
+
+def create_samples():
+
+    m = Upstox_Manager('config.ini')
+    m.login_upstox()
+    c = m.client
+    print('\n-----------------------------')
+    print('Balance - ')
+    print(c.get_balance())
+    print('\n-----------------------------')
+    print('Profile - ')
+    print(c.get_profile())
+    print('\n-----------------------------')
+    print('Holdings - ')
+    print(c.get_holdings())
+    print('\n-----------------------------')
+    print('Positions - ')
+    print(c.get_positions())
+    print('\n-----------------------------')
+    print('Orders - ')
+    orders = c.get_order_history()
+    for order in orders:
+        print('\n-----------------------------')
+        print(order)
+
+    trades = c.get_trade_book()
+    for t in trades:
+        print('\n-----------------------------')
+        print(order)
 
 
 if __name__ == '__main__':

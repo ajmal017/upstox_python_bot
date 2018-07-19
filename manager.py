@@ -3,17 +3,13 @@ import threading
 import configparser
 from queue import Queue
 from time import sleep
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from upstox_api import api
 
+import utils 
 from options import Gann
 
 MAX_LOGIN_TRIES = 10
-
-TRADE_OPEN = datetime.strptime(date.today().strftime('%d-%m-%y') + '-09:15',
-                               '%d-%m-%y-%H:%M')
-TRADE_CUTOFF = datetime.strptime(date.today().strftime('%d-%m-%y') + '-15:15',
-                                 '%d-%m-%y-%H:%M')
 
 
 class Upstox_Manager:
@@ -29,9 +25,10 @@ class Upstox_Manager:
 
         self.config = configparser.ConfigParser()
         self.config.read(config_name)
+        self.opening, self.cutoff = utils.get_trade_hours(date.today())
 
         self.client = None
-        self.workers = []
+        self.bots = []
         self.queues = {}
         self.threads = []
 
@@ -78,10 +75,11 @@ class Upstox_Manager:
         if self.client is None:
             return
 
+        print('Loading master contracts')
         try:
             nse_fo = self.client.get_master_contract('nse_fo')
             if nse_fo:
-                print('Loaded NSE F&O master contracts.')
+                print('NSE F&O loaded.')
         except Exception as e:
             print('unable to load NSE_FO master contracts')
             print(e)
@@ -89,7 +87,7 @@ class Upstox_Manager:
             self.client.enabled_exchanges.append('nse_index')
             nse_index = self.client.get_master_contract('nse_index')
             if nse_index:
-                print('Loaded NSE Index master contracts.')
+                print('NSE Index loaded.')
         except Exception as e:
             print('unable to load NSE_INDEX master contracts')
 
@@ -101,41 +99,32 @@ class Upstox_Manager:
         with open(self.config_name, 'w') as cf:
             self.config.write(cf)
 
-    def add_worker(self, worker=None):
-        if worker is None:
-            print("Failed to add worker - Invalid arguments")
-            return
-
-        q = Queue()
-        syms = worker.setup(q)
-        if type(syms) is tuple:
-            self.queues[syms] = q
-        elif type(syms) is list:
-            self.queues[tuple(syms)] = q
-        else:
-            self.queues[(syms, )] = q
-
-        self.threads.append(worker)
-
     def run(self):
+        print(self.opening)
+        print(self.cutoff)
         while 1:
             try:
-                if datetime.now() < TRADE_OPEN:
+                now = datetime.now()
+                if now < self.opening:
                     print('\nWaiting for trade hours to start')
                     sleep(10)
-                elif datetime.now() > TRADE_CUTOFF:
-                    print('\nCutoff time reached. Close all positions')
-                    self.stop()
-                elif not self.running:
+                elif not self.running and now > self.opening and now < self.cutoff:
                     print('\nStarting bots...')
                     self.client.start_websocket(True)
                     self.running = True
-                    for t in self.threads:
-                        t.start()
-                else:
-                    sleep(1)
+                    self.start_bots()
+                elif now > self.cutoff and self.running is True:
+                    print('\nCutoff time reached. Close all positions')
+                    self.stop()
+                elif now > self.cutoff:
+                    tom = datetime.now() + timedelta(days=1)
+                    self.opening, self.cutoff = utils.get_trade_hours(tom.date())
+                    print('\n')
+                    print(self.opening)
+                    print(self.cutoff)
             except KeyboardInterrupt:
                 self.stop()
+                return
             except Exception as e:
                 print('\n-------------------')
                 print(e)
@@ -175,11 +164,11 @@ class Upstox_Manager:
                 pass
 
     def stop(self):
-        for w in self.workers:
-            w.stop()
-
-        for t in self.threads:
-            t.join()
+        self.running = False
+        for bot in self.bots:
+            bot.stop()
+            if bot.isAlive():
+                bot.join()
 
         for stock in self.subbed_stocks:
             try:
@@ -187,15 +176,31 @@ class Upstox_Manager:
             except Exception as e:
                 pass
         self.subbed_stocks.clear()
+        if self.client.websocket is not None:
+            self.client.websocket.keep_running = False
 
-        self.client.websocket.keep_running = False
+    def start_bots(self):
+        if len(self.bots) < 1:
+            print('No Bots to run!')
+            return
+        for bot in self.bots:
+            q = Queue()
+            syms = bot.setup(q)
+            if type(syms) is tuple:
+                self.queues[syms] = q
+            elif type(syms) is list:
+                self.queues[tuple(syms)] = q
+            else:
+                self.queues[(syms, )] = q
+            bot.start()
+
 
 
 def main():
     m = Upstox_Manager('config.ini')
     m.login_upstox()
     g = Gann(m.client)
-    m.add_worker(g)
+    m.bots.append(g)
     m.run()
 
 

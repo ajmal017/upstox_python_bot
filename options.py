@@ -1,19 +1,22 @@
 from upstox_api import api
-import utils
-import threading
+from utils import BUY, SELL, NIFTY_OPTION_TEMPLATE, round_off
 from time import sleep
 from math import sqrt
 from datetime import date
 from threading import Thread
+from bot import TradeBot
 
-N50_SYMBOL = 'NIFTY_50'
-LOT_SIZE = 75
 NUM_LOTS = 10
 BUY = 'B'
 SELL = 'S'
 
+N50_SYMBOL = 'NIFTY_50'
+LOT_SIZE = 75
 
-class Gann(Thread):
+PE_TEMPLATE = NIFTY_OPTION_TEMPLATE + 'pe'
+CE_TEMPLATE = NIFTY_OPTION_TEMPLATE + 'ce'
+
+class Gann(TradeBot):
     def __init__(self, client):
         super().__init__()
         if not isinstance(client, api.Upstox):
@@ -22,7 +25,7 @@ class Gann(Thread):
         else:
             self.client = client
 
-        self.lock = threading.Lock()
+        self.daemon = True
         self.running = False
         self.messages = None
 
@@ -58,31 +61,19 @@ class Gann(Thread):
         if 'initialised' in self.activity and self.messages is not None:
             return
 
-        self.messages = message_queue
-        self.daemon = True
-
         nifty = self.client.get_instrument_by_symbol('nse_index', N50_SYMBOL)
         data = self.client.get_live_feed(nifty, api.LiveFeedType.Full)
 
         nearest_100 = int(float(data['open']) / 100) * 100
-        print('Nearest 100 for Nifty = %d' % nearest_100)
-
-        tod = date.today()
-        pe_symbol = 'nifty' + tod.strftime('%y%b').lower() + str(nearest_100) + 'pe'
-        ce_symbol = 'nifty' + tod.strftime('%y%b').lower() + str(nearest_100) + 'ce'
+        pe_symbol = PE_TEMPLATE % nearest_100
+        ce_symbol = CE_TEMPLATE % nearest_100
         print('FnO symbols for trade = %s | %s' % (pe_symbol, ce_symbol))
 
         pe_inst = self.client.get_instrument_by_symbol('nse_fo', pe_symbol)
-        ce_inst = self.client.get_instrument_by_symbol('nse_fo', ce_symbol)
-
         pe_feed = self.client.get_live_feed(pe_inst, api.LiveFeedType.Full)
         self.pe_inst = pe_inst
-        pe_prices = self.get_gann_prices(pe_feed['open'])
-        self.pe_sl = pe_prices[0]
-        self.pe_buy = pe_prices[1]
-        self.pe_target = pe_prices[2]
+        self.pe_sl, self.pe_buy, self.pe_target = self.get_gann_prices(pe_feed['open'])
         self.pe_prev_ltp = pe_feed['open']
-
         print(self.client.subscribe(pe_inst, api.LiveFeedType.LTP))
         print('-----')
         print('Initial values for %s - ' % pe_inst.symbol)
@@ -93,14 +84,11 @@ class Gann(Thread):
 
         # -------------------------------------------------------------------------------
 
+        ce_inst = self.client.get_instrument_by_symbol('nse_fo', ce_symbol)
         ce_feed = self.client.get_live_feed(ce_inst, api.LiveFeedType.Full)
         self.ce_inst = ce_inst
-        ce_prices = self.get_gann_prices(ce_feed['open'])
-        self.ce_buy = ce_prices[1]
-        self.ce_target = ce_prices[2]
-        self.ce_sl = ce_prices[0]
+        self.ce_sl, self.ce_buy, self.ce_target = self.get_gann_prices(ce_feed['open'])
         self.ce_prev_ltp = ce_feed['open']
-
         print(self.client.subscribe(ce_inst, api.LiveFeedType.LTP))
         print('-----')
         print('Initial values for %s - ' % ce_inst.symbol)
@@ -132,9 +120,9 @@ class Gann(Thread):
     def get_gann_prices(self, tp=None):
         if tp is None:
             return tp
-        return [utils.round_off((sqrt(tp) - self.gann_angles[self.buy_gann]) ** 2),
-                utils.round_off((sqrt(tp) + self.gann_angles[self.sl_gann]) ** 2),
-                utils.round_off((sqrt(tp) + self.gann_angles[self.target_gann]) ** 2)]
+        return round_off((sqrt(tp) - self.gann_angles[self.buy_gann]) ** 2), \
+            round_off((sqrt(tp) + self.gann_angles[self.sl_gann]) ** 2), \
+            round_off((sqrt(tp) + self.gann_angles[self.target_gann]) ** 2)
 
     def process_quote(self, message):
         sym = message['symbol'].lower()
@@ -258,10 +246,7 @@ class Gann(Thread):
                       (message['symbol'], ltp))
                 self.activity.append('pe_sell_target')
         elif ltp < self.pe_prev_ltp:
-            pe_gann = self.get_gann_prices(ltp)
-            self.pe_sl = pe_gann[0]
-            self.pe_buy = pe_gann[1]
-            self.pe_target = pe_gann[2]
+            self.pe_sl, self.pe_buy, self.pe_target = self.get_gann_prices(ltp)
             print('\nRecalculated prices for %s - ' % self.pe_inst.symbol)
             print('Buy Trigger        - %f' % self.pe_buy)
             print('Sell Trigger       - %f' % self.pe_target)
@@ -306,10 +291,7 @@ class Gann(Thread):
                       (message['symbol'], ltp))
                 self.activity.append('ce_sell_target')
         elif ltp < self.ce_prev_ltp:
-            ce_gann = self.get_gann_prices(ltp)
-            self.ce_sl = ce_gann[0]
-            self.ce_buy = ce_gann[1]
-            self.ce_target = ce_gann[2]
+            self.ce_sl, self.ce_buy, self.ce_target = self.get_gann_prices(ltp)
             print('\nRecalculated prices for %s - ' % self.ce_inst.symbol)
             print('Buy Trigger        - %f' % self.ce_buy)
             print('Sell Trigger       - %f' % self.ce_target)

@@ -60,6 +60,7 @@ class Gann(TradeBot):
         if 'initialised' in self.activity and self.messages is not None:
             return
 
+        self.messages = message_queue
         nifty = self.client.get_instrument_by_symbol('nse_index', N50_SYMBOL)
         data = self.client.get_live_feed(nifty, api.LiveFeedType.Full)
 
@@ -160,7 +161,6 @@ class Gann(TradeBot):
     def process_trade(self, message):
         sym = message['symbol'].lower()
         qty = int(message['traded_quantity'])
-        qty = int(message['quantity'])
         oid = str(message['order_id'])
         tt = str(message['transaction_type'])
         atp = float(message['average_price'])
@@ -216,10 +216,10 @@ class Gann(TradeBot):
             return
 
         if ltp > self.pe_buy and act in ('initialised', 'ce_position_closed'):
-            lots = self.get_tradeable_lots(ltp, 0.9)
+            lots = self.get_tradeable_lots(ltp, 0.8)
             self.client.place_order(api.TransactionType.Buy,
                                     self.pe_inst,
-                                    lots,
+                                    75 * lots,
                                     api.OrderType.Limit,
                                     api.ProductType.OneCancelsOther,
                                     self.pe_buy,
@@ -262,10 +262,10 @@ class Gann(TradeBot):
             return
 
         if ltp > self.ce_buy and act in ('initialised', 'pe_position_closed'):
-            lots = self.get_tradeable_lots(ltp, 0.9)
+            lots = self.get_tradeable_lots(ltp, 0.8)
             self.client.place_order(api.TransactionType.Buy,
                                     self.ce_inst,
-                                    lots,
+                                    75 * lots,
                                     api.OrderType.Limit,
                                     api.ProductType.OneCancelsOther,
                                     self.ce_buy,

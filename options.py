@@ -7,14 +7,13 @@ from threading import Thread
 from bot import TradeBot
 
 NUM_LOTS = 10
-BUY = 'B'
-SELL = 'S'
 
 N50_SYMBOL = 'NIFTY_50'
 LOT_SIZE = 75
 
 PE_TEMPLATE = NIFTY_OPTION_TEMPLATE + 'pe'
 CE_TEMPLATE = NIFTY_OPTION_TEMPLATE + 'ce'
+
 
 class Gann(TradeBot):
     def __init__(self, client):
@@ -217,23 +216,24 @@ class Gann(TradeBot):
             return
 
         if ltp > self.pe_buy and act in ('initialised', 'ce_position_closed'):
-                self.client.place_order(api.TransactionType.Buy,
-                                        self.pe_inst,
-                                        LOT_SIZE * NUM_LOTS,
-                                        api.OrderType.Limit,
-                                        api.ProductType.OneCancelsOther,
-                                        self.pe_buy,
-                                        None,
-                                        0,
-                                        api.DurationType.DAY,
-                                        abs(self.pe_buy - self.pe_sl),
-                                        abs(self.pe_target - self.pe_buy),
-                                        20)
-                print('Placed buy order for %s at %f' %
-                      (message['symbol'], ltp))
-                print('\nTarget = %f\nStoploss = %f' % (self.pe_target, self.pe_sl))
-                self.activity.append('pe_ordered')
-                return
+            lots = self.get_tradeable_lots(ltp, 0.9)
+            self.client.place_order(api.TransactionType.Buy,
+                                    self.pe_inst,
+                                    lots,
+                                    api.OrderType.Limit,
+                                    api.ProductType.OneCancelsOther,
+                                    self.pe_buy,
+                                    None,
+                                    0,
+                                    api.DurationType.DAY,
+                                    abs(self.pe_buy - self.pe_sl),
+                                    abs(self.pe_target - self.pe_buy),
+                                    20)
+            print('Placed buy order for %s at %f' %
+                  (message['symbol'], ltp))
+            print('\nTarget = %f\nStoploss = %f' % (self.pe_target, self.pe_sl))
+            self.activity.append('pe_ordered')
+            return
         elif act == 'pe_ordered':
             return
         elif act == 'pe_position_open':
@@ -262,23 +262,24 @@ class Gann(TradeBot):
             return
 
         if ltp > self.ce_buy and act in ('initialised', 'pe_position_closed'):
-                self.client.place_order(api.TransactionType.Buy,
-                                        self.ce_inst,
-                                        LOT_SIZE,
-                                        api.OrderType.Limit,
-                                        api.ProductType.OneCancelsOther,
-                                        self.ce_buy,
-                                        None,
-                                        0,
-                                        api.DurationType.DAY,
-                                        abs(self.ce_buy - self.ce_sl),
-                                        abs(self.ce_target - self.ce_buy),
-                                        20)
-                print('Placed buy order for %s at %f' %
-                      (message['symbol'], ltp))
-                print('\nTarget = %f\nStoploss = %f' % (self.ce_target, self.ce_sl))
-                self.activity.append('ce_ordered')
-                return
+            lots = self.get_tradeable_lots(ltp, 0.9)
+            self.client.place_order(api.TransactionType.Buy,
+                                    self.ce_inst,
+                                    lots,
+                                    api.OrderType.Limit,
+                                    api.ProductType.OneCancelsOther,
+                                    self.ce_buy,
+                                    None,
+                                    0,
+                                    api.DurationType.DAY,
+                                    abs(self.ce_buy - self.ce_sl),
+                                    abs(self.ce_target - self.ce_buy),
+                                    20)
+            print('Placed buy order for %s at %f' %
+                  (message['symbol'], ltp))
+            print('\nTarget = %f\nStoploss = %f' % (self.ce_target, self.ce_sl))
+            self.activity.append('ce_ordered')
+            return
         elif act == 'ce_ordered':
             return
         elif act == 'ce_position_open':
@@ -297,3 +298,10 @@ class Gann(TradeBot):
             print('Sell Trigger       - %f' % self.ce_target)
             print('SL Trigger - %f' % self.ce_sl)
             self.ce_prev_ltp = message['ltp']
+
+    def get_tradeable_lots(self, ltp, ratio=0.9):
+        balance = self.client.get_balance()['equity']['available_margin']
+        num_lots = int((balance * ratio) / (75.0 * ltp))
+        return num_lots
+
+

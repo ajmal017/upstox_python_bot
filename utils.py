@@ -1,7 +1,16 @@
-import configparser
-from upstox_api import api
-from datetime import datetime, timedelta
-import os
+import calendar
+from datetime import datetime, date
+
+MAX_LOGIN_TRIES = 10
+TRADE_OPEN = datetime.strptime(date.today().strftime('%d-%m-%y') + '-09:16',
+                               '%d-%m-%y-%H:%M')
+TRADE_CUTOFF = datetime.strptime(date.today().strftime('%d-%m-%y') + '-15:15',
+                                 '%d-%m-%y-%H:%M')
+
+BUY = 'B'
+SELL = 'S'
+
+NIFTY_OPTION_TEMPLATE = 'nifty' + date.today().strftime('%y%b').lower() + '%d'
 
 
 def round_off(num, div=0.1):
@@ -9,62 +18,54 @@ def round_off(num, div=0.1):
     return float(x)
 
 
-def create_config_file(config_name='config.ini'):
-    conf = configparser.ConfigParser()
-    conf['userinfo'] = {'key': '0',
-                        'secret': '0',
-                        'token': '0',
-                        'last_login': '0'}
-    with open(config_name, 'w') as cf:
-        conf.write(cf)
+def get_trade_hours(date):
+    o = datetime.strptime(date.strftime('%d-%m-%y') + '-09:16', '%d-%m-%y-%H:%M')
+    c = datetime.strptime(date.strftime('%d-%m-%y') + '-15:15', '%d-%m-%y-%H:%M')
+    return o, c
 
 
-def login_upstox(config_name):
-    confPath = os.path.join(os.getcwd(), config_name)
-    if not os.path.exists(confPath):
-        create_config_file(config_name)
+def ts_to_datetime(ts=None):
+    if ts is None:
+        return ts
+    return datetime.fromtimestamp(ts / 1000)
 
-    config = configparser.ConfigParser()
-    config.read(config_name)
-    creds = config['userinfo']
+    
+def thursdays():
+    c = calendar.Calendar()
+    days = []
+    thursday = 3
+    for i in range(1, 13):
+        for d in c.itermonthdates(2018, i):
+            if d.weekday() == thursday:
+                days.append(d)
+    with open('thursdays.txt', 'w') as f:
+        for day in days:
+            f.write(day.strftime('%d-%m-%Y\n'))
 
-    client = None
 
-    if creds['key'] == '0':
-        creds['key'] = input('Please enter the API key - ')
-    if creds['secret'] == '0':
-        creds['secret'] = input('Please enter the API secret - ')
+EXPIRIES = ['04-01-2018', '11-01-2018', '18-01-2018', '25-01-2018', '01-02-2018',
+            '01-02-2018', '08-02-2018', '15-02-2018', '22-02-2018', '01-03-2018',
+            '08-03-2018', '15-03-2018', '22-03-2018', '29-03-2018', '05-04-2018',
+            '12-04-2018', '19-04-2018', '26-04-2018', '03-05-2018', '10-05-2018',
+            '17-05-2018', '24-05-2018', '31-05-2018', '31-05-2018', '07-06-2018',
+            '14-06-2018', '21-06-2018', '28-06-2018', '28-06-2018', '05-07-2018',
+            '12-07-2018', '19-07-2018', '26-07-2018', '02-08-2018', '02-08-2018',
+            '09-08-2018', '16-08-2018', '23-08-2018', '30-08-2018', '06-09-2018',
+            '13-09-2018', '20-09-2018', '27-09-2018', '04-10-2018', '11-10-2018',
+            '18-10-2018', '25-10-2018', '01-11-2018', '08-11-2018', '15-11-2018',
+            '22-11-2018', '29-11-2018', '06-12-2018', '13-12-2018', '20-12-2018',
+            '27-12-2018', '03-01-2019']
 
-    s = api.Session(creds['key'])
-    s.set_redirect_uri('http://127.0.0.1')
-    s.set_api_secret(creds['secret'])
-    diff = None
 
-    if creds['last_login'] == '0':
-        diff = timedelta(hours=1)
-    else:
-        now = datetime.now()
-        last = datetime.strptime(creds['last_login'], '%d-%m-%Y %H:%M')
-        diff = now - last
+def get_expiry_dates(month=1):
+    dates = []
+    for e in EXPIRIES:
+        d = int(e[0:2])
+        m = int(e[3:5])
+        Y = int(e[6:])
+        if m == month:
+            dates.append(date(day=d, month=m, year=Y))
+    return dates
 
-    if creds['token'] == '0' or diff > timedelta(hours=11, minutes=59):
-        url = s.get_login_url()
-        print('Auth url - ')
-        print(url)
-        code = input("Please enter the code from the login page - ")
-        s.set_code(code)
-        creds['token'] = s.retrieve_access_token()
-    else:
-        print('Reusing token - ', creds['token'])
-    try:
-        client = api.Upstox(creds['key'], creds['token'])
-    except Exception as e:
-        print('ERROR! Unable to start Upstox client.')
-        print(e)
 
-    creds['last_login'] = datetime.now().strftime('%d-%m-%Y %H:%M')
-
-    with open(config_name, 'w') as cf:
-        config.write(cf)
-
-    return client
+print(date.today().month)

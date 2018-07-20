@@ -1,9 +1,11 @@
 from upstox_api import api
-from utils import BUY, SELL, get_expiry_dates, round_off, ts_to_datetime
+from utils import BUY, SELL, get_expiry_dates, round_off
 from time import sleep
 from math import sqrt
 from datetime import date, timedelta
 from bot import TradeBot
+
+NUM_LOTS = 10
 
 N50_SYMBOL = 'NIFTY_50'
 LOT_SIZE = 75
@@ -20,6 +22,7 @@ class Gann(TradeBot):
         else:
             self.client = client
 
+        self.daemon = True
         self.running = False
         self.messages = None
         self.cylces = 0
@@ -57,25 +60,14 @@ class Gann(TradeBot):
             return
 
         self.messages = message_queue
-        self.daemon = True
-
-
-        print('Nearest 100 for Nifty = %d' % nearest_100)
-
         pe_symbol, ce_symbol = self._create_options_symbols()
         print('FnO symbols for trade = %s | %s' % (pe_symbol, ce_symbol))
 
         pe_inst = self.client.get_instrument_by_symbol('nse_fo', pe_symbol)
-        ce_inst = self.client.get_instrument_by_symbol('nse_fo', ce_symbol)
-
         pe_feed = self.client.get_live_feed(pe_inst, api.LiveFeedType.Full)
         self.pe_inst = pe_inst
-        pe_prices = self.get_gann_prices(pe_feed['open'])
-        self.pe_sl = pe_prices[0]
-        self.pe_buy = pe_prices[1]
-        self.pe_target = pe_prices[2]
+        self.pe_sl, self.pe_buy, self.pe_target = self.get_gann_prices(pe_feed['open'])
         self.pe_prev_ltp = pe_feed['open']
-
         print(self.client.subscribe(pe_inst, api.LiveFeedType.LTP))
         print('-----')
         print('Initial values for %s - ' % pe_inst.symbol)
@@ -86,14 +78,11 @@ class Gann(TradeBot):
 
         # -------------------------------------------------------------------------------
 
+        ce_inst = self.client.get_instrument_by_symbol('nse_fo', ce_symbol)
         ce_feed = self.client.get_live_feed(ce_inst, api.LiveFeedType.Full)
         self.ce_inst = ce_inst
-        ce_prices = self.get_gann_prices(ce_feed['open'])
-        self.ce_buy = ce_prices[1]
-        self.ce_target = ce_prices[2]
-        self.ce_sl = ce_prices[0]
+        self.ce_sl, self.ce_buy, self.ce_target = self.get_gann_prices(ce_feed['open'])
         self.ce_prev_ltp = ce_feed['open']
-
         print(self.client.subscribe(ce_inst, api.LiveFeedType.LTP))
         print('-----')
         print('Initial values for %s - ' % ce_inst.symbol)
@@ -103,7 +92,6 @@ class Gann(TradeBot):
         print('-----')
 
         self.activity.append('initialised')
-
         return (ce_inst.symbol.lower(), pe_inst.symbol.lower())
 
     def run(self):
@@ -162,7 +150,6 @@ class Gann(TradeBot):
     def process_trade(self, message):
         sym = message['symbol'].lower()
         qty = int(message['traded_quantity'])
-        qty = int(message['quantity'])
         oid = str(message['order_id'])
         tt = str(message['transaction_type'])
         atp = float(message['average_price'])
@@ -250,10 +237,7 @@ class Gann(TradeBot):
                       (message['symbol'], ltp))
                 self.activity.append('pe_sell_target')
         elif ltp < self.pe_prev_ltp:
-            pe_gann = self.get_gann_prices(ltp)
-            self.pe_sl = pe_gann[0]
-            self.pe_buy = pe_gann[1]
-            self.pe_target = pe_gann[2]
+            self.pe_sl, self.pe_buy, self.pe_target = self.get_gann_prices(ltp)
             print('\nRecalculated prices for %s - ' % self.pe_inst.symbol)
             print('Buy Trigger        - %f' % self.pe_buy)
             print('Sell Trigger       - %f' % self.pe_target)
@@ -299,10 +283,7 @@ class Gann(TradeBot):
                       (message['symbol'], ltp))
                 self.activity.append('ce_sell_target')
         elif ltp < self.ce_prev_ltp:
-            ce_gann = self.get_gann_prices(ltp)
-            self.ce_sl = ce_gann[0]
-            self.ce_buy = ce_gann[1]
-            self.ce_target = ce_gann[2]
+            self.ce_sl, self.ce_buy, self.ce_target = self.get_gann_prices(ltp)
             print('\nRecalculated prices for %s - ' % self.ce_inst.symbol)
             print('Buy Trigger        - %f' % self.ce_buy)
             print('Sell Trigger       - %f' % self.ce_target)
@@ -322,7 +303,6 @@ class Gann(TradeBot):
         return num_lots
 
     def _create_options_symbols(self):
-        syms = []
         tod = date.today()
         exp = get_expiry_dates(tod.month)[-1]
         if exp - tod < timedelta(days=6):
@@ -331,6 +311,5 @@ class Gann(TradeBot):
         nifty = self.client.get_instrument_by_symbol('nse_index', N50_SYMBOL)
         data = self.client.get_live_feed(nifty, api.LiveFeedType.Full)
         nearest_100 = int(float(data['open']) / 100) * 100
-        syms.append('nifty' + exp.strftime('%y%b').lower() + str(nearest_100) + 'pe')
-        syms.append('nifty' + exp.strftime('%y%b').lower() + str(nearest_100) + 'ce')
-        return tuple(syms)
+        return ('nifty' + exp.strftime('%y%b').lower() + str(nearest_100) + 'pe'),
+        ('nifty' + exp.strftime('%y%b').lower() + str(nearest_100) + 'ce')

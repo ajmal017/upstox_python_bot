@@ -8,6 +8,7 @@
 *.swo
 
 test.py
+main.py
 backtest.py
 __pycache__/
 ohlc/

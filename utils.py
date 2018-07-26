@@ -13,7 +13,7 @@ def round_off(num, div=0.1):
 
 
 def get_trade_hours(date):
-    o = datetime.strptime(date.strftime('%d-%m-%y') + '-09:16', '%d-%m-%y-%H:%M')
+    o = datetime.strptime(date.strftime('%d-%m-%y') + '-09:15', '%d-%m-%y-%H:%M')
     c = datetime.strptime(date.strftime('%d-%m-%y') + '-15:15', '%d-%m-%y-%H:%M')
     return o, c
 
@@ -23,7 +23,7 @@ def ts_to_datetime(ts=None):
         return ts
     return datetime.fromtimestamp(ts / 1000)
 
-    
+
 def thursdays():
     c = calendar.Calendar()
     days = []

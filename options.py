@@ -1,20 +1,24 @@
-from upstox_api import api
-from utils import BUY, SELL, get_expiry_dates, round_off
+import logging
+from collections import namedtuple
 from time import sleep
-from math import sqrt
 from datetime import date, timedelta
+from upstox_api import api
+from utils import BUY, SELL, get_expiry_dates
+from indicators import gann
 from bot import TradeBot
+from logger import create_logger
 
-NUM_LOTS = 10
 
 N50_SYMBOL = 'NIFTY_50'
 LOT_SIZE = 75
 
 MAX_CYCLES = 2
 
+Levels = namedtuple('Levels', ['buy', 'stoploss', 'target'])
+
 
 class Gann(TradeBot):
-    def __init__(self, client):
+    def __init__(self, client, debug=False):
         super().__init__()
         if not isinstance(client, api.Upstox):
             print('Provide an Upstox class object for gann.client')
@@ -25,79 +29,122 @@ class Gann(TradeBot):
         self.daemon = True
         self.running = False
         self.messages = None
-        self.cylces = 0
+        self.cycles = 0
+        if debug:
+            self.logger = create_logger('gann_opt_')
+        else:
+            self.logger = create_logger('gann_opt_')
 
         self.holdings = 0
         self.tally = 0.0
         self.parent_oid = None
         self.target_oid = None
         self.sl_oid = None
-        self.sell_oids = []
         self.activity = []
 
-        self.gann_angles = (0.02, 0.04, 0.08, 0.1, 0.15, 0.25, 0.35,
-                            0.40, 0.42, 0.46, 0.48, 0.5, 0.67, 1.0)
-
-        self.buy_gann = 4
-        self.sl_gann = 5
-        self.target_gann = -1
+        self.gann_buy = 4
+        self.gann_sl = 5
+        self.gann_target = -1
 
         self.pe_inst = None
-        self.pe_buy = None
-        self.pe_target = None
-        self.pe_sl = None
+        self.pe_levels = Levels(0, 0, 0)
         self.pe_prev_ltp = None
 
         self.ce_inst = None
-        self.ce_buy = None
-        self.ce_sl = None
-        self.ce_target = None
+        self.ce_levels = Levels(0, 0, 0)
         self.ce_prev_ltp = None
-
+        self.logger.info('===============================')
+        self.logger.info('Created Gann Tradebot')
 
     def setup(self, message_queue=None):
-        if 'initialised' in self.activity and self.messages is not None:
+        if 'setup complete' in self.activity and self.messages is not None:
+            self.logger.debug('Initialise function called twice')
             return
+        self.logger.debug('Creating options symbols')
+        calls = []
+        tod = date.today()
+        exp = get_expiry_dates(tod.month)[-1]
+        if exp - tod < timedelta(days=6):
+            exp = get_expiry_dates(tod.month + 1)[-1]
+        nifty = self.client.get_instrument_by_symbol('nse_index', N50_SYMBOL)
+        data = self.client.get_live_feed(nifty, api.LiveFeedType.Full)
+        nearest_100 = int(float(data['close']) / 100) * 100
+        self.logger.debug('Base price for options = %d' % nearest_100)
 
-        self.messages = message_queue
-        pe_symbol, ce_symbol = self._create_options_symbols()
-        print('FnO symbols for trade = %s | %s' % (pe_symbol, ce_symbol))
+        puts = []
+        for i in range(100, 500, 100):
+            sym = 'nifty' + exp.strftime('%y%b').lower() + str(nearest_100 + i) + 'pe'
+            feed = self.client.get_live_feed(self.client.get_instrument_by_symbol('nse_fo', sym),
+                                             api.LiveFeedType.Full)
+            puts.append(feed)
+        puts_sorted = sorted(puts, key=lambda k: float(k['close']))
+        pe_sym = puts_sorted[0]['symbol'].lower()
+        self.pe_inst = self.client.get_instrument_by_symbol('nse_fo', pe_sym)
 
-        pe_inst = self.client.get_instrument_by_symbol('nse_fo', pe_symbol)
-        pe_feed = self.client.get_live_feed(pe_inst, api.LiveFeedType.Full)
-        self.pe_inst = pe_inst
-        self.pe_sl, self.pe_buy, self.pe_target = self.get_gann_prices(pe_feed['open'])
-        self.pe_prev_ltp = pe_feed['open']
-        print(self.client.subscribe(pe_inst, api.LiveFeedType.LTP))
+        while self.client.subscribe(self.pe_inst, api.LiveFeedType.LTP)['success'] is not True:
+            sleep(1)
+        else:
+            self.logger.debug('Subscribed to %s' % self.pe_inst.symbol)
+
+        calls = []
+        for i in range(-500, -100, 100):
+            sym = 'nifty' + exp.strftime('%y%b').lower() + str(nearest_100 + i) + 'ce'
+            feed = self.client.get_live_feed(self.client.get_instrument_by_symbol('nse_fo', sym),
+                                             api.LiveFeedType.Full)
+            calls.append(feed)
+        calls_sorted = sorted(calls, key=lambda k: float(k['close']))
+        ce_sym = calls_sorted[0]['symbol'].lower()
+        self.ce_inst = self.client.get_instrument_by_symbol('nse_fo', ce_sym)
+        while self.client.subscribe(self.ce_inst, api.LiveFeedType.LTP)['success'] is not True:
+            sleep(1)
+        else:
+            self.logger.debug('Subscribed to %s' % self.ce_inst.symbol)
+
+        self.activity.append('setup complete')
+        self.logger.debug(self.activity[-1])
+        self.logger.debug('Symbols = %s | %s' % (ce_sym, pe_sym))
+        return (ce_sym, pe_sym)
+
+    def _calculate_initial_values(self, quote):
+        if 'initialised all' in self.activity:
+            self.logger.debug('Initialise function called twice')
+            return
+        sym = quote['symbol'].lower()
+        ltp = float(quote['ltp'])
+        if sym == self.pe_inst.symbol.lower() and \
+           'initialised pe' not in self.activity:
+            levels = gann(ltp)
+            self.pe_levels = Levels(levels[self.gann_buy],
+                                    levels[self.gann_target],
+                                    levels[self.gann_sl])
+            self.pe_prev_ltp = ltp
+            self.activity.append('initialised %s' % sym[-2:])
+        elif sym == self.ce_inst.symbol.lower() and \
+                'initialised ce' not in self.activity:
+            levels = gann(ltp)
+            self.ce_levels = Levels(levels[self.gann_buy],
+                                    levels[self.gann_target],
+                                    levels[self.gann_sl])
+            self.ce_prev_ltp = ltp
+            self.activity.append('initialised %s' % sym[-2:])
+        elif 'initialised ce' in self.activity and 'initialised pe' in self.activity:
+            self.activity.append('initialised all')
+            return
+        self.logger.debug(self.activity[-1])
+
         print('-----')
-        print('Initial values for %s - ' % pe_inst.symbol)
-        print('Buy Trigger        - %f' % self.pe_buy)
-        print('Sell Trigger       - %f' % self.pe_target)
-        print('Initial SL Trigger - %f' % self.pe_sl)
+        print('Initial values for %s - ' % sym)
+        print('Buy Trigger        - %f' % levels.buy)
+        print('Sell Trigger       - %f' % levels.target)
+        print('Initial SL Trigger - %f' % levels.stoploss)
         print('-----')
-
-        # -------------------------------------------------------------------------------
-
-        ce_inst = self.client.get_instrument_by_symbol('nse_fo', ce_symbol)
-        ce_feed = self.client.get_live_feed(ce_inst, api.LiveFeedType.Full)
-        self.ce_inst = ce_inst
-        self.ce_sl, self.ce_buy, self.ce_target = self.get_gann_prices(ce_feed['open'])
-        self.ce_prev_ltp = ce_feed['open']
-        print(self.client.subscribe(ce_inst, api.LiveFeedType.LTP))
-        print('-----')
-        print('Initial values for %s - ' % ce_inst.symbol)
-        print('Buy Trigger        - %f' % self.ce_buy)
-        print('Sell Trigger       - %f' % self.ce_target)
-        print('Initial SL Trigger - %f' % self.ce_sl)
-        print('-----')
-
-        self.activity.append('initialised')
-        return (ce_inst.symbol.lower(), pe_inst.symbol.lower())
+        self.logger.debug((self.client.subscribe(self.pe_inst, api.LiveFeedType.LTP)))
+        self.logger.debug('Initialised values for %s' % sym)
 
     def run(self):
         if not self.running:
             self.running = True
-
+        self.logger.info('Starting run loop.')
         while self.running:
             while not self.messages.empty():
                 m = self.messages.get()
@@ -112,8 +159,12 @@ class Gann(TradeBot):
 
     def process_quote(self, message):
         sym = message['symbol'].lower()
+        if 'initialised all' not in self.activity:
+            self._calculate_initial_values(message)
+            return
         if self.cycles == MAX_CYCLES:
             print('\nGann bot completed allowed trade cycles. Shutting down...')
+            self.logger.info('Trade cycles complete. Shutting down')
             self.stop()
         if sym == self.pe_inst.symbol.lower():
             self._pe_gann(message)
@@ -152,7 +203,6 @@ class Gann(TradeBot):
         qty = int(message['traded_quantity'])
         oid = str(message['order_id'])
         tt = str(message['transaction_type'])
-        atp = float(message['average_price'])
         status = str(message['status'])
         poid = None
         if message['parent_order_id'] != 'NA':
@@ -161,7 +211,7 @@ class Gann(TradeBot):
         if tt == BUY:
             if status in ('complete', 'completed'):
                 self.holdings += qty
-                self.tally -= qty * atp
+                self.logger.info('Current holdings for %s = %d' % (sym, self.holdings))
                 if poid is None:
                     self.parent_oid = oid
                 else:
@@ -175,7 +225,6 @@ class Gann(TradeBot):
             if poid is not None and poid == self.parent_oid \
                and status in ('complete', 'completed'):
                 self.holdings -= qty
-                self.tally += qty * atp
                 self.sell_oids.append(oid)
                 if self.holdings <= 0:
                     # self.log_trade(parent_oid)
@@ -189,6 +238,7 @@ class Gann(TradeBot):
                         self.activity.append('pe_position_closed')
                     elif sym == self.ce_inst.symbol.lower():
                         self.activity.append('ce_position_closed')
+        self._log_trade(message)
 
     def stop(self):
         print("Stopping Gann Robot")
@@ -205,7 +255,7 @@ class Gann(TradeBot):
         if ltp > self.pe_buy + ltp * 0.01:
             return
 
-        if ltp > self.pe_buy and act in ('initialised', 'ce_position_closed') and \
+        if ltp > self.pe_buy and act in ('initialised all', 'ce_position_closed') and \
            "ce_sell_target" not in self.activity:
             lots = self._get_tradeable_lots(ltp, 0.9)
             self.client.place_order(api.TransactionType.Buy,
@@ -217,8 +267,8 @@ class Gann(TradeBot):
                                     None,
                                     0,
                                     api.DurationType.DAY,
-                                    abs(self.pe_buy - self.pe_sl),
-                                    abs(self.pe_target - self.pe_buy),
+                                    abs(self.pe_levels.buy - self.pe_levels.stoploss),
+                                    abs(self.pe_levels.target - self.pe_levels.buy),
                                     20)
             print('Placed buy order for %s at %f' %
                   (message['symbol'], ltp))
@@ -237,7 +287,10 @@ class Gann(TradeBot):
                       (message['symbol'], ltp))
                 self.activity.append('pe_sell_target')
         elif ltp < self.pe_prev_ltp:
-            self.pe_sl, self.pe_buy, self.pe_target = self.get_gann_prices(ltp)
+            levels = gann(ltp)
+            self.pe_levels = Levels(levels[self.gann_buy],
+                                    levels[self.gann_target],
+                                    levels[self.gann_sl])
             print('\nRecalculated prices for %s - ' % self.pe_inst.symbol)
             print('Buy Trigger        - %f' % self.pe_buy)
             print('Sell Trigger       - %f' % self.pe_target)
@@ -253,7 +306,7 @@ class Gann(TradeBot):
 
         if ltp > self.ce_buy and act in ('initialised', 'pe_position_closed') and \
            "pe_sell_target" not in self.activity:
-            lots = self._get_tradeable_lots(ltp, 0.8)
+            lots = self._get_tradeable_lots(ltp, 0.9)
             self.client.place_order(api.TransactionType.Buy,
                                     self.ce_inst,
                                     lots * LOT_SIZE,
@@ -283,33 +336,52 @@ class Gann(TradeBot):
                       (message['symbol'], ltp))
                 self.activity.append('ce_sell_target')
         elif ltp < self.ce_prev_ltp:
-            self.ce_sl, self.ce_buy, self.ce_target = self.get_gann_prices(ltp)
+            levels = gann(ltp)
+            self.ce_levels = Levels(levels[self.gann_buy],
+                                    levels[self.gann_target],
+                                    levels[self.gann_sl])
             print('\nRecalculated prices for %s - ' % self.ce_inst.symbol)
             print('Buy Trigger        - %f' % self.ce_buy)
             print('Sell Trigger       - %f' % self.ce_target)
             print('SL Trigger - %f' % self.ce_sl)
             self.ce_prev_ltp = message['ltp']
 
-    def _get_gann_prices(self, tp=None):
-        if tp is None:
-            return tp
-        return [round_off((sqrt(tp) - self.gann_angles[self.buy_gann]) ** 2),
-                round_off((sqrt(tp) + self.gann_angles[self.sl_gann]) ** 2),
-                round_off((sqrt(tp) + self.gann_angles[self.target_gann]) ** 2)]
-
     def _get_tradeable_lots(self, ltp, ratio=0.9):
         balance = self.client.get_balance()['equity']['available_margin']
         num_lots = int((balance * ratio) / (75.0 * ltp))
         return num_lots
 
-    def _create_options_symbols(self):
-        tod = date.today()
-        exp = get_expiry_dates(tod.month)[-1]
-        if exp - tod < timedelta(days=6):
-            exp = get_expiry_dates(tod.month + 1)[-1]
 
-        nifty = self.client.get_instrument_by_symbol('nse_index', N50_SYMBOL)
-        data = self.client.get_live_feed(nifty, api.LiveFeedType.Full)
-        nearest_100 = int(float(data['open']) / 100) * 100
-        return ('nifty' + exp.strftime('%y%b').lower() + str(nearest_100) + 'pe'),
-        ('nifty' + exp.strftime('%y%b').lower() + str(nearest_100) + 'ce')
+    def _log_trade(self, trade_info=None):
+        if trade_info is None:
+            self.logger.error('Invalid trade info given to _log_trade()')
+        lots = int(int(trade_info['traded_quantity']) / 75)
+        sym = trade_info['symbol'].lower()
+        oid = str(trade_info['order_id'])
+        poid = str(trade_info['parent_order_id'])
+        # atp = float(trade_info['average_price'])
+
+        if trade_info['transaction_type'] == BUY:
+            self.logger.info('Purchased %d lots of %s' % (lots, sym))
+        else:
+            self.logger.info('Sold %d lots of %s' % (lots, sym))
+
+        if poid:
+            self.logger.info('Parent OID - %s' % poid)
+        self.logger.info('Order ID - %s' % oid)
+        self.logger.info('Current holdings - %d' % self.holdings)
+
+    def _movement_range(self, instrument=None, num_days=5):
+        if self.client is None or instrument is None:
+            return 0
+        tod = date.today()
+        start = tod - timedelta(days=10)
+        ohlc = self.client.get_ohlc(instrument, api.OHLCInterval.Day_1,
+                                    start, tod - timedelta(days=1))[-5:]
+        print('\nRetrieved %d OHLCs' % len(ohlc))
+        avg_range = 0
+        for o in ohlc:
+            print(o)
+            avg_range += 100 * (o['high'] - o['low']) / o['close']
+        return avg_range / len(ohlc)
+

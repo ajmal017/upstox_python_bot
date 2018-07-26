@@ -1,6 +1,7 @@
 from bot import TradeBot
 from datetime import date, timedelta
 from upstox_api import api
+from indicators import ema, sma
 
 INDEX = 'NIFTY_50'
 

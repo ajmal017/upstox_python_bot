@@ -14,6 +14,8 @@ MAX_LOGIN_TRIES = 10
 class Upstox_Manager:
 
     def __init__(self, config_name):
+        self.logger = logging.getLogger()
+
         if '.ini' not in config_name.lower():
             config_name = config_name + '.ini'
 
@@ -35,7 +37,6 @@ class Upstox_Manager:
         self.subbed_stocks = []
         self.running = False
         self._setup_logger()
-        self.logger = logging.getLogger()
         self.logger.debug("Initialised Upstox_manager")
 
     def create_config_file(self):

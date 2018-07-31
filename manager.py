@@ -6,15 +6,14 @@ from time import sleep
 from datetime import date, datetime, timedelta
 from upstox_api import api
 import utils
-from options import Gann
 
 MAX_LOGIN_TRIES = 10
+TIMEOUT = 10
 
 
-class Upstox_Manager:
-
-    def __init__(self, config_name):
-        if '.ini' not in config_name.lower():
+class Manager:
+    def __init__(self, config_name, debug=False):
+        if '.ini' not in config_name.lower()[-4:]:
             config_name = config_name + '.ini'
 
         self.config_name = config_name
@@ -29,14 +28,13 @@ class Upstox_Manager:
 
         self.client = None
         self.bots = []
-        self.queues = {}
-        self.threads = []
+        self.quotes = Queue()
+        self.orders = Queue()
+        self.trades = Queue()
 
         self.subbed_stocks = []
         self.running = False
-        self._setup_logger()
-        self.logger = logging.getLogger()
-        self.logger.debug("Initialised Upstox_manager")
+        self._setup_logger(debug)
 
     def create_config_file(self):
         conf = configparser.ConfigParser()
@@ -110,95 +108,98 @@ class Upstox_Manager:
             self.config.write(cf)
             self.logger.info('Updated config file')
 
-    def run(self):
-        self.logger.info('Starting run loop')
-        self.logger.debug('opening - ' + self.opening.isoformat())
-        self.logger.debug('close - ' + self.cutoff.isoformat())
-
-        self._setup_bots()
+    def main_loop(self, freq=0.2):
         if datetime.now() < self.opening:
-            print('\nWaiting for trade hours to start')
-        while 1:
-            if self.last_update is not None:
-                if self.last_update - datetime.now() > timedelta(20) and self.running:
-                    self._reconnect()
-            try:
-                now = datetime.now()
-                if now < self.opening:
-                    sleep(10)
-                elif not self.running and now > self.opening and now < self.cutoff:
-                    print('Trade open! Starting websocket.')
-                    self.running = True
-                    self.client.start_websocket(True)
-                elif now > self.cutoff and self.running is True:
-                    print('\nCutoff time reached. Close all positions')
-                    self._stop()
-                elif now > self.cutoff:
-                    tom = datetime.now() + timedelta(days=1)
-                    self.opening, self.cutoff = utils.get_trade_hours(tom.date())
-                    print('\n')
-                    print(self.opening)
-                    print(self.cutoff)
-            except KeyboardInterrupt:
-                self._stop()
-                return
-            except Exception as e:
-                self.logger.exception('Fatal error in Gann.run()')
-
-    def _setup_bots(self):
-        print('\nSetting up Trade bots')
-        if len(self.bots) < 1:
-            self.logger.critical('No Bots to run!')
+            self.logger.info('Waiting for trade hours to start')
+            while datetime.now() < self.opening:
+                sleep(TIMEOUT)
+        elif datetime.now() > self.cutoff:
+            self.logger.info('Trade day over. Will not run main loop')
             return
-        for bot in self.bots:
-            q = Queue()
-            syms = bot.setup(q)
-            self.logger.info('Added %s bot. Required instruments:' %
-                             bot.__class__.__name__)
-            for s in syms:
-                self.logger.info(s)
-            if type(syms) is tuple:
-                self.queues[syms] = q
-            elif type(syms) is list:
-                self.queues[tuple(syms)] = q
-            else:
-                self.queues[(syms, )] = q
+        self.running = True
+        self.client.start_websocket(True)
+        try:
+            while self.running:
+                if self.last_update is not None:
+                    diff = datetime.now() - self.last_update
+                    if diff.seconds < TIMEOUT:
+                        self.logger.debug('No update received in over %d seconds' % TIMEOUT)
+                        self._reconnect()
+                if datetime.now() > self.cutoff():
+                    self.logger.info('Trade hours over. Exiting main loop')
+                    self._stop()
+                    self.running = False
+
+                while not self.quotes.empty():
+                    m = self.quotes.get()
+                    sym = m.symbol.lower()
+                    for bot in self.bots:
+                        if sym in bot[0]:
+                            bot.process_quote(m)
+                    self.quotes.task_done()
+
+                while not self.orders.empty():
+                    m = self.orders.get()
+                    sym = m.symbol.lower()
+                    for bot in self.bots:
+                        if sym in bot[0]:
+                            bot.process_order(m)
+                    self.orders.task_done()
+
+                while not self.trades.empty():
+                    m = self.trades.get()
+                    sym = m.symbol.lower()
+                    for bot in self.bots:
+                        if sym in bot[0]:
+                            bot.process_trade(m)
+                    self.trades.task_done()
+                sleep(freq)
+
+        except KeyboardInterrupt:
+            self.logger.info('Forced exit by user')
+        except Exception as e:
+            self.logger.exception('Unknown error in manager.main_loop')
+
+    def add_strategy(self, bot):
+        self.bots.append((bot.get_symbols(), bot))
+        syms = bot.get_symbols()
+        if syms is not None:
+            bot.setup(self.client)
+            syms = bot.get_symbols()
+
+        for s in bot.get_symbols():
+            self.subbed_stocks.append(s)
 
     def quote_handler(self, message):
         self.last_update = datetime.now()
-        sym = message['instrument'].symbol.lower()
-        self.last_update = datetime.now()
-        print(sym, message['ltp'])
-        if not any(inst for inst in self.subbed_stocks if inst.symbol.lower() == sym):
-            self.subbed_stocks.append(message['instrument'])
-        try:
-            for k, w in self.queues.items():
-                if sym in k:
-                    self.queues[k].put(('q', message))
-        except Exception as e:
-            self.logger.info("Symbol %s - no worker associated" % sym)
-
-    def order_handler(self, message):
-        sym = message['instrument'].symbol.lower()
-        try:
-            for k, w in self.queues.items():
-                if sym in k:
-                    self.queues[k].put(('o', message))
-        except Exception as e:
-            self.logger.info("Symbol %s - no worker associated" % sym)
-
-    def trade_handler(self, message):
-        sym = message['instrument'].symbol.lower()
-        try:
-            for k, w in self.queues.items():
-                if sym in k:
-                    self.queues[k].put(('t', message))
-        except Exception as e:
-            self.logger.debug("Trade update for %s with worker associated" % sym)
+        inst = message['instrument']
+        if inst.symbol.lower() not in self.subbed_stocks:
             try:
-                self.client.unsubscribe(message['instrument'], api.LiveFeedType.LTP)
+                self.client.unsubscribe(inst, api.LiveFeedType.LTP)
             except Exception as e:
                 pass
+        else:
+            self.quotes.put(message)
+
+    def order_handler(self, message):
+        inst = message['instrument']
+        if inst.symbol.lower() not in self.subbed_stocks:
+            try:
+                self.client.unsubscribe(inst, api.LiveFeedType.LTP)
+            except Exception as e:
+                pass
+        else:
+            self.orders.put(message)
+
+    def trade_handler(self, message):
+        inst = message['instrument']
+        if inst.symbol.lower() not in self.subbed_stocks:
+            try:
+                self.client.unsubscribe(inst, api.LiveFeedType.LTP)
+            except Exception as e:
+                pass
+        else:
+            self.orders.put(message)
 
     def _stop(self):
         self.running = False
@@ -216,10 +217,10 @@ class Upstox_Manager:
             self.client.websocket.keep_running = False
 
     def _disconnect_handler(self, message):
-        print('Websocket Disconnected')
+        self.logger.info('Websocket Disconnected')
 
     def _reconnect(self):
-        print('Reconnecting websocket')
+        self.logger.info('Reconnecting websocket')
         for inst in self.subbed_stocks:
             try:
                 self.client.subscribe(inst, api.LiveFeedType.LTP)
@@ -227,34 +228,25 @@ class Upstox_Manager:
                 pass
         self.client.start_websocket(True)
 
-    def _setup_logger(self):
+    def _setup_logger(self, debug):
         fn = date.today().strftime('%d-%m-%Y_root.log')
         with open(fn, 'w'):
             pass
 
         logger = logging.getLogger()
-
+        self.logger = logger
         fmt = logging.Formatter('[%(asctime)s ROOT] - %(levelname)s - %(message)s')
+
+        ch = logging.StreamHandler()
+        ch.setFormatter(fmt)
+        if debug:
+            ch.setLevel(logging.DEBUG)
+        else:
+            ch.setLevel(logging.INFO)
+        logger.addHandler(ch)
 
         fh = logging.FileHandler(fn)
         fh.setFormatter(fmt)
-        fh.setLevel(logging.INFO)
+        fh.setLevel(logging.DEBUG)
         logger.addHandler(fh)
 
-        with open('errors.log', 'w'):
-            pass
-        eh = logging.FileHandler('errors.log')
-        eh.setLevel(logging.ERROR)
-        logger.addHandler(eh)
-
-
-def main():
-    m = Upstox_Manager('config.ini')
-    m.login_upstox()
-    g = Gann(m.client)
-    m.bots.append(g)
-    m.run()
-
-
-if __name__ == '__main__':
-    main()

@@ -107,7 +107,6 @@ class Upstox_Manager:
         self.client.set_on_order_update(self.order_handler)
         self.client.set_on_trade_update(self.trade_handler)
         self.client.set_on_disconnect(self._disconnect_handler)
-        self.client.set_on_error(self._disconnect_handler)
 
         creds['last_login'] = datetime.now().strftime('%d-%m-%Y %H:%M')
         with open(self.config_name, 'w') as cf:
@@ -124,7 +123,7 @@ class Upstox_Manager:
             print('\nWaiting for trade hours to start')
         while 1:
             if self.last_update is not None:
-                if self.last_update - datetime.now() > timedelta(20) and self.running:
+                if self.last_update - datetime.now() > timedelta(utils.TIMEOUT) and self.running:
                     self._reconnect()
             try:
                 now = datetime.now()
@@ -161,14 +160,16 @@ class Upstox_Manager:
             syms = bot.setup(q)
             self.logger.info('Added %s bot. Required instruments:' %
                              bot.__class__.__name__)
-            for s in syms:
-                self.logger.info(s)
             if type(syms) is tuple:
-                self.queues[syms] = q
+                pass
             elif type(syms) is list:
-                self.queues[tuple(syms)] = q
+                syms = tuple(syms)
             else:
-                self.queues[(syms, )] = q
+                syms = (syms, )
+            for s in syms:
+                self.subbed_stocks.append(s)
+                self.logger.info(s)
+            self.queues[(syms, )] = q
 
     def quote_handler(self, message):
         self.last_update = datetime.now()
@@ -182,7 +183,11 @@ class Upstox_Manager:
                 if sym in k:
                     self.queues[k].put(('q', message))
         except Exception as e:
-            self.logger.info("Symbol %s - no worker associated" % sym)
+            try:
+                self.logger.info("Symbol %s - no worker associated" % sym)
+                self.client.unsubscribe(message['instrument'], api.LiveFeedType.LTP)
+            except Exception as e:
+                self.logger.exception('Exception while unsubscribing instrument')
 
     def order_handler(self, message):
         sym = message['instrument'].symbol.lower()

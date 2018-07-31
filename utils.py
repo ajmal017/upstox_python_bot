@@ -6,6 +6,8 @@ MAX_LOGIN_TRIES = 10
 BUY = 'B'
 SELL = 'S'
 
+TIMEOUT = 10
+
 
 def round_off(num, div=0.1):
     x = div * round(num / div)

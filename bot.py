@@ -43,13 +43,8 @@ class TradeBot(Thread):
 
 
 class LinearBot:
-    messages = None
-    running = False
 
     def __init__(self):
-        super().__init__()
-
-    def run(self):
         pass
 
     def process_quote(self, quote):
@@ -60,3 +55,6 @@ class LinearBot:
 
     def process_trade(self, trade):
         pass
+
+    def get_symbols(self):
+        return None

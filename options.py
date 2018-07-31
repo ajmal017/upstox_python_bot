@@ -61,6 +61,7 @@ class Gann(TradeBot):
             self.logger.debug('Initialise function called twice')
             return
         self.logger.debug('Creating options symbols')
+        self.messages = message_queue
         tod = date.today()
         exp = get_expiry_dates(tod.month)[-1]
         if exp - tod < timedelta(days=6):
@@ -118,9 +119,9 @@ class Gann(TradeBot):
             return
         sym = quote['symbol'].lower()
         ltp = float(quote['ltp'])
+        levels = gann(ltp)
         if sym == self.pe_inst.symbol.lower() and \
            'initialised pe' not in self.activity:
-            levels = gann(ltp)
             self.pe_levels = Levels(levels[self.gann_buy],
                                     levels[self.gann_target],
                                     levels[self.gann_sl])
@@ -128,7 +129,6 @@ class Gann(TradeBot):
             self.activity.append('initialised %s' % sym[-2:])
         elif sym == self.ce_inst.symbol.lower() and \
                 'initialised ce' not in self.activity:
-            levels = gann(ltp)
             self.ce_levels = Levels(levels[self.gann_buy],
                                     levels[self.gann_target],
                                     levels[self.gann_sl])
@@ -142,11 +142,10 @@ class Gann(TradeBot):
 
         print('-----')
         print('Initial values for %s - ' % sym)
-        print('Buy Trigger        - %f' % levels.buy)
-        print('Sell Trigger       - %f' % levels.target)
-        print('Initial SL Trigger - %f' % levels.stoploss)
+        print('Buy Trigger        - %f' % levels[self.gann_buy])
+        print('Sell Trigger       - %f' % levels[self.gann_target])
+        print('Initial SL Trigger - %f' % levels[self.gann_sl])
         print('-----')
-        self.logger.debug((self.client.subscribe(self.pe_inst, api.LiveFeedType.LTP)))
         self.logger.debug('Initialised values for %s' % sym)
 
     def run(self):
@@ -260,10 +259,11 @@ class Gann(TradeBot):
         ltp = message['ltp']
         act = self.activity[-1]
 
-        if ltp > self.pe_buy + ltp * 0.01:
+        if ltp > self.pe_levels.buy + ltp * 0.01:
             return
 
-        if ltp > self.pe_buy and act in ('initialised all', 'ce_position_closed') and \
+        if ltp > self.pe_levels.buy and \
+           act in ('initialised all', 'ce_position_closed') and \
            "ce_sell_target" not in self.activity:
             lots = self._get_tradeable_lots(ltp, 0.9)
             self.client.place_order(api.TransactionType.Buy,
@@ -271,7 +271,7 @@ class Gann(TradeBot):
                                     LOT_SIZE * lots,
                                     api.OrderType.Limit,
                                     api.ProductType.OneCancelsOther,
-                                    self.pe_buy,
+                                    self.pe_levels.buy,
                                     None,
                                     0,
                                     api.DurationType.DAY,
@@ -280,17 +280,18 @@ class Gann(TradeBot):
                                     20)
             print('Placed buy order for %s at %f' %
                   (message['symbol'], ltp))
-            print('\nTarget = %f\nStoploss = %f' % (self.pe_target, self.pe_sl))
+            print('\nTarget = %f\nStoploss = %f' % (self.pe_levels.target,
+                                                    self.pe_levels.stoploss))
             self.activity.append('pe_ordered')
             return
         elif act == 'pe_ordered':
             return
         elif act == 'pe_position_open':
-            if ltp < self.pe_sl and self.parent_oid is not None:
+            if ltp < self.pe_levels.stoploss and self.parent_oid is not None:
                 print('Stoploss reached for %s at %f' %
                       (message['symbol'], ltp))
                 self.activity.append('pe_sell_sl')
-            elif ltp > self.pe_target:
+            elif ltp > self.pe_levels.target:
                 print('Profit target reached for %s at %f' %
                       (message['symbol'], ltp))
                 self.activity.append('pe_sell_target')
@@ -300,19 +301,19 @@ class Gann(TradeBot):
                                     levels[self.gann_target],
                                     levels[self.gann_sl])
             print('\nRecalculated prices for %s - ' % self.pe_inst.symbol)
-            print('Buy Trigger        - %f' % self.pe_buy)
-            print('Sell Trigger       - %f' % self.pe_target)
-            print('SL Trigger - %f' % self.pe_sl)
+            print('Buy Trigger        - %f' % self.pe_levels.buy)
+            print('Sell Trigger       - %f' % self.pe_levels.target)
+            print('SL Trigger - %f' % self.pe_levels.stoploss)
             self.pe_prev_ltp = message['ltp']
 
     def _ce_gann(self, message):
         ltp = message['ltp']
         act = self.activity[-1]
 
-        if ltp > self.ce_buy + ltp * 0.01:
+        if ltp > self.ce_levels.buy + ltp * 0.01:
             return
 
-        if ltp > self.ce_buy and act in ('initialised', 'pe_position_closed') and \
+        if ltp > self.ce_levels.buy and act in ('initialised', 'pe_position_closed') and \
            "pe_sell_target" not in self.activity:
             lots = self._get_tradeable_lots(ltp, 0.9)
             self.client.place_order(api.TransactionType.Buy,
@@ -320,12 +321,12 @@ class Gann(TradeBot):
                                     lots * LOT_SIZE,
                                     api.OrderType.Limit,
                                     api.ProductType.OneCancelsOther,
-                                    self.ce_buy,
+                                    self.ce_levels.buy,
                                     None,
                                     0,
                                     api.DurationType.DAY,
-                                    abs(self.ce_buy - self.ce_sl),
-                                    abs(self.ce_target - self.ce_buy),
+                                    abs(self.ce_levels.buy - self.ce_levels.stoploss),
+                                    abs(self.ce_levels.target - self.ce_levels.buy),
                                     20)
             print('Placed buy order for %s at %f' %
                   (message['symbol'], ltp))
@@ -349,9 +350,9 @@ class Gann(TradeBot):
                                     levels[self.gann_target],
                                     levels[self.gann_sl])
             print('\nRecalculated prices for %s - ' % self.ce_inst.symbol)
-            print('Buy Trigger        - %f' % self.ce_buy)
-            print('Sell Trigger       - %f' % self.ce_target)
-            print('SL Trigger - %f' % self.ce_sl)
+            print('Buy Trigger        - %f' % self.ce_levels.buy)
+            print('Sell Trigger       - %f' % self.ce_levels.target)
+            print('SL Trigger - %f' % self.ce_levels.stoploss)
             self.ce_prev_ltp = message['ltp']
 
     def _get_tradeable_lots(self, ltp, ratio=0.9):

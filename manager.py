@@ -133,6 +133,8 @@ class Upstox_Manager:
                 elif not self.running and now > self.opening and now < self.cutoff:
                     print('Trade open! Starting websocket.')
                     self.running = True
+                    for b in self.bots:
+                        b.start()
                     self.client.start_websocket(True)
                 elif now > self.cutoff and self.running is True:
                     print('\nCutoff time reached. Close all positions')

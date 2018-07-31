@@ -30,13 +30,16 @@ class Upstox_Manager:
         self.client = None
         self.bots = []
         self.queues = {}
-        self.threads = []
 
         self.subbed_stocks = []
         self.running = False
         self._setup_logger()
         self.logger = logging.getLogger()
         self.logger.debug("Initialised Upstox_manager")
+        tod = date.today().strftime('%d%m%Y')
+        self.trades_log = 'trades_%s' % tod + '.txt' 
+        with open(self.trades_log, 'w'):
+            pass
 
     def create_config_file(self):
         conf = configparser.ConfigParser()
@@ -189,6 +192,13 @@ class Upstox_Manager:
 
     def trade_handler(self, message):
         sym = message['instrument'].symbol.lower()
+        with open(self.trades_log, 'a'):
+            print('===========================================\n')
+            for k, v in message:
+                if k == 'instrument':
+                    pass
+                else:
+                    print('\t', k, ' : ', v)
         try:
             for k, w in self.queues.items():
                 if sym in k:
@@ -217,9 +227,11 @@ class Upstox_Manager:
 
     def _disconnect_handler(self, message):
         print('Websocket Disconnected')
+        self.logger.debug('Websocket Disconnected')
 
     def _reconnect(self):
         print('Reconnecting websocket')
+        self.logger.debug('Reconnecting Websocket')
         for inst in self.subbed_stocks:
             try:
                 self.client.subscribe(inst, api.LiveFeedType.LTP)

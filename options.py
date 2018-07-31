@@ -61,7 +61,6 @@ class Gann(TradeBot):
             self.logger.debug('Initialise function called twice')
             return
         self.logger.debug('Creating options symbols')
-        calls = []
         tod = date.today()
         exp = get_expiry_dates(tod.month)[-1]
         if exp - tod < timedelta(days=6):
@@ -71,29 +70,14 @@ class Gann(TradeBot):
         nearest_100 = int(float(data['close']) / 100) * 100
         self.logger.debug('Base price for options = %d' % nearest_100)
 
-        puts = []
-        for i in range(100, 500, 100):
-            sym = 'nifty' + exp.strftime('%y%b').lower() + str(nearest_100 + i) + 'pe'
-            feed = self.client.get_live_feed(self.client.get_instrument_by_symbol('nse_fo', sym),
-                                             api.LiveFeedType.Full)
-            puts.append(feed)
-        puts_sorted = sorted(puts, key=lambda k: float(k['close']))
-        pe_sym = puts_sorted[0]['symbol'].lower()
+        pe_sym = self._get_put_symbol(nearest_100, exp)
         self.pe_inst = self.client.get_instrument_by_symbol('nse_fo', pe_sym)
-
         while self.client.subscribe(self.pe_inst, api.LiveFeedType.LTP)['success'] is not True:
             sleep(1)
         else:
             self.logger.debug('Subscribed to %s' % self.pe_inst.symbol)
 
-        calls = []
-        for i in range(-500, -100, 100):
-            sym = 'nifty' + exp.strftime('%y%b').lower() + str(nearest_100 + i) + 'ce'
-            feed = self.client.get_live_feed(self.client.get_instrument_by_symbol('nse_fo', sym),
-                                             api.LiveFeedType.Full)
-            calls.append(feed)
-        calls_sorted = sorted(calls, key=lambda k: float(k['close']))
-        ce_sym = calls_sorted[0]['symbol'].lower()
+        ce_sym = self._get_call_symbol(nearest_100, exp)
         self.ce_inst = self.client.get_instrument_by_symbol('nse_fo', ce_sym)
         while self.client.subscribe(self.ce_inst, api.LiveFeedType.LTP)['success'] is not True:
             sleep(1)
@@ -102,8 +86,31 @@ class Gann(TradeBot):
 
         self.activity.append('setup complete')
         self.logger.debug(self.activity[-1])
-        self.logger.debug('Symbols = %s | %s' % (ce_sym, pe_sym))
         return (ce_sym, pe_sym)
+
+    def _get_put_symbol(self, nearest_100, exp):
+        puts = []
+        for i in range(-500, 0, 100):
+            sym = 'nifty' + exp.strftime('%y%b').lower() + str(nearest_100 + i) + 'pe'
+            feed = self.client.get_live_feed(self.client.get_instrument_by_symbol('nse_fo', sym),
+                                             api.LiveFeedType.Full)
+            if feed['close'] > 50.0 and feed['close'] < 100:
+                puts.append(feed)
+        puts_sorted = sorted(puts, key=lambda k: float(k['close']))
+        pe_sym = puts_sorted[0]['symbol'].lower()
+        return pe_sym
+
+    def _get_call_symbol(self, nearest_100, exp):
+        calls = []
+        for i in range(0, 500, 100):
+            sym = 'nifty' + exp.strftime('%y%b').lower() + str(nearest_100 + i) + 'ce'
+            feed = self.client.get_live_feed(self.client.get_instrument_by_symbol('nse_fo', sym),
+                                             api.LiveFeedType.Full)
+            if feed['close'] > 50.0 and feed['close'] < 100:
+                calls.append(feed)
+        calls_sorted = sorted(calls, key=lambda k: float(k['close']))
+        ce_sym = calls_sorted[0]['symbol'].lower()
+        return ce_sym
 
     def _calculate_initial_values(self, quote):
         if 'initialised all' in self.activity:
@@ -129,6 +136,7 @@ class Gann(TradeBot):
             self.activity.append('initialised %s' % sym[-2:])
         elif 'initialised ce' in self.activity and 'initialised pe' in self.activity:
             self.activity.append('initialised all')
+            self.logger.debug(self.activity[-1])
             return
         self.logger.debug(self.activity[-1])
 
@@ -200,7 +208,7 @@ class Gann(TradeBot):
 
     def process_trade(self, message):
         sym = message['symbol'].lower()
-        qty = int(message['traded_quantity'])
+        qty = int(message['quantity'])
         oid = str(message['order_id'])
         tt = str(message['transaction_type'])
         status = str(message['status'])
@@ -351,11 +359,10 @@ class Gann(TradeBot):
         num_lots = int((balance * ratio) / (75.0 * ltp))
         return num_lots
 
-
     def _log_trade(self, trade_info=None):
         if trade_info is None:
             self.logger.error('Invalid trade info given to _log_trade()')
-        lots = int(int(trade_info['traded_quantity']) / 75)
+        lots = int(int(trade_info['quantity']) / 75)
         sym = trade_info['symbol'].lower()
         oid = str(trade_info['order_id'])
         poid = str(trade_info['parent_order_id'])

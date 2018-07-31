@@ -39,3 +39,24 @@ class TradeBot(Thread):
 
     def stop(self):
         self.running = False
+
+
+
+class LinearBot:
+    messages = None
+    running = False
+
+    def __init__(self):
+        super().__init__()
+
+    def run(self):
+        pass
+
+    def process_quote(self, quote):
+        pass
+
+    def process_order(self, order):
+        pass
+
+    def process_trade(self, trade):
+        pass

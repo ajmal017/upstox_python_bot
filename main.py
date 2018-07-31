@@ -3,7 +3,9 @@ from options import Gann
 
 
 def main():
-    m = Upstox_Manager('config.ini')
+    conf = input("Enter config file name: ")
+    conf += '.ini'
+    m = Upstox_Manager(conf)
     m.login_upstox()
     g = Gann(m.client, True)
     m.bots.append(g)

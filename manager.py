@@ -5,6 +5,7 @@ from queue import Queue
 from time import sleep
 from datetime import date, datetime, timedelta
 from upstox_api import api
+from urllib3.exceptions import MaxRetryError
 import utils
 
 MAX_LOGIN_TRIES = 10
@@ -64,6 +65,8 @@ class Manager:
                 self.client = api.Upstox(creds['key'], creds['token'])
                 self.logger.info('Logged in successfully.')
                 break
+            except MaxRetryError:
+                self.logger.exception('Unable to login- check internet connection')
             except Exception as e:
                 if 'Invalid Bearer token' in e.args[0]:
                     url = s.get_login_url()
@@ -110,22 +113,31 @@ class Manager:
 
     def main_loop(self, freq=0.2):
         if datetime.now() < self.opening:
-            self.logger.info('Waiting for trade hours to start')
-            while datetime.now() < self.opening:
-                sleep(TIMEOUT)
+            print('Waiting for trade hours to start')
+            try:
+                while datetime.now() < self.opening:
+                    sleep(TIMEOUT)
+            except KeyboardInterrupt:
+                print('Interrupted by user. Exiting')
+                self._unsubscribe_all()
+                return
         elif datetime.now() > self.cutoff:
             self.logger.info('Trade day over. Will not run main loop')
             return
+
         self.running = True
+        self.logger.info('Starting websocket')
+        print('Starting websocket')
         self.client.start_websocket(True)
         try:
+            print('Entering main loop')
             while self.running:
                 if self.last_update is not None:
                     diff = datetime.now() - self.last_update
                     if diff.seconds < TIMEOUT:
                         self.logger.debug('No update received in over %d seconds' % TIMEOUT)
                         self._reconnect()
-                if datetime.now() > self.cutoff():
+                if datetime.now() > self.cutoff:
                     self.logger.info('Trade hours over. Exiting main loop')
                     self._stop()
                     self.running = False
@@ -159,6 +171,8 @@ class Manager:
             self.logger.info('Forced exit by user')
         except Exception as e:
             self.logger.exception('Unknown error in manager.main_loop')
+        finally:
+            self._unsubscribe_all()
 
     def add_strategy(self, bot):
         self.bots.append((bot.get_symbols(), bot))
@@ -201,12 +215,8 @@ class Manager:
         else:
             self.orders.put(message)
 
-    def _stop(self):
+    def _unsubscribe_all(self):
         self.running = False
-        for bot in self.bots:
-            bot.stop()
-            if bot.isAlive():
-                bot.join()
         for stock in self.subbed_stocks:
             try:
                 self.client.unsubscribe(stock, api.LiveFeedType.LTP)

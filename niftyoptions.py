@@ -16,7 +16,7 @@ class GannNiftyOptions:
     def __init__(self, debug=False):
         self.running = False
         self.cycles = 0
-        self.logger = create_logger(self.__name__)
+        self.logger = create_logger(self.__class__.__name__)
 
         self.pe_bot = GannBot()
         self.pe_symbol = None
@@ -40,21 +40,23 @@ class GannNiftyOptions:
         self.logger.debug('Base price for options = %d' % nearest_100)
 
         self._create_ce_symbol(client, nearest_100, exp)
-        ce_inst = self.client.get_instrument_by_symbol('nse_fo', self.ce_symbol)
-        while self.client.subscribe(ce_inst, upstox.LiveFeedType.LTP)['success'] is not True:
+        ce_inst = client.get_instrument_by_symbol('nse_fo', self.ce_symbol)
+        while client.subscribe(ce_inst, upstox.LiveFeedType.LTP)['success'] is not True:
             sleep(1)
         else:
             self.logger.debug('Subscribed to %s' % self.ce_symbol)
+            self.logger.debug('close = %f' % ce_inst.closing_price)
 
         self._create_pe_symbol(client, nearest_100, exp)
-        pe_inst = client.get_instrument_by_symbol('nse_fo', self.pe_sym)
-        while self.client.subscribe(pe_inst, upstox.LiveFeedType.LTP)['success'] is not True:
+        pe_inst = client.get_instrument_by_symbol('nse_fo', self.pe_symbol)
+        while client.subscribe(pe_inst, upstox.LiveFeedType.LTP)['success'] is not True:
             sleep(1)
         else:
             self.logger.debug('Subscribed to %s' % self.pe_symbol)
+            self.logger.debug('close = %f' % pe_inst.closing_price)
 
         self.state.append('setup complete')
-        self.logger.debug(self.activity[-1])
+        self.logger.debug(self.state[-1])
 
     def process_quote(self, quote):
         sym = quote['symbol'].lower()
@@ -105,7 +107,7 @@ class GannNiftyOptions:
     def _create_pe_symbol(self, client, nearest_100, expiry):
         exp = expiry
         puts = []
-        for i in range(0, 500, 100):
+        for i in range(-400, 0, 100):
             sym = 'nifty' + exp.strftime('%y%b').lower() + str(nearest_100 + i) + 'pe'
             feed = client.get_live_feed(client.get_instrument_by_symbol('nse_fo', sym),
                                         upstox.LiveFeedType.Full)
@@ -116,7 +118,7 @@ class GannNiftyOptions:
     def _create_ce_symbol(self, client, nearest_100, expiry):
         exp = expiry
         calls = []
-        for i in range(-400, 0, 100):
+        for i in range(0, 400, 100):
             sym = 'nifty' + exp.strftime('%y%b').lower() + str(nearest_100 + i) + 'ce'
             feed = client.get_live_feed(client.get_instrument_by_symbol('nse_fo', sym),
                                         upstox.LiveFeedType.Full)

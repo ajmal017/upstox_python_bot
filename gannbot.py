@@ -1,6 +1,5 @@
 from bot import LinearBot
 from upstox_api import api as upstox
-from logger import create_logger
 from indicators import gann
 from utils import BUY, SELL
 
@@ -14,7 +13,6 @@ class GannBot(LinearBot):
 
         self.running = False
         self.messages = None
-        self.logger = create_logger(self.__name__)
 
         self.buy = 0
         self.target = 0
@@ -30,8 +28,6 @@ class GannBot(LinearBot):
         self.oid = None
         self.poid = None
 
-        self.logger.info('===============================')
-        self.logger.info('Gann Tradebot Initialised')
         self.state.append('Initialised')
 
     def process_quote(self, quote):

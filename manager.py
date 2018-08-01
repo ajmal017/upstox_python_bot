@@ -36,6 +36,7 @@ class Manager:
         self.subbed_stocks = []
         self.running = False
         self._setup_logger(debug)
+        
 
     def create_config_file(self):
         conf = configparser.ConfigParser()

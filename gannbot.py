@@ -52,6 +52,7 @@ class GannBot(LinearBot):
             self.target = levels[DEFAULTS['target']]
             self.stoploss = gann(ltp, 'down')[DEFAULTS['stoploss']]
             self.prev_ltp = ltp
+            self._print_levels()
         return act
 
     def process_order(self, order):
@@ -92,6 +93,7 @@ class GannBot(LinearBot):
         self.target = levels[DEFAULTS['target']]
         self.stoploss = gann(ltp, 'down')[DEFAULTS['stoploss']]
         self.prev_ltp = ltp
+        self._print_levels()
         self.state.append('setup complete')
 
     def _create_buy_order(self):
@@ -104,3 +106,11 @@ class GannBot(LinearBot):
                  'stoploss': abs(self.buy - self.stoploss),
                  'target': abs(self.target - self.buy)}
         return order
+
+    def _print_levels(self):
+        print('--------')
+        print('\nCalculated values for %s - ' % self.instrument.symbol)
+        print('Buy   - %f' % self.buy)
+        print('Sell  - %f' % self.target)
+        print('SL    - %f' % self.stoploss)
+        print('--------')

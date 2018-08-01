@@ -130,12 +130,13 @@ class Manager:
         self.logger.info('Starting websocket')
         print('Starting websocket')
         self.client.start_websocket(True)
+        self.last_update = datetime.now()
         try:
             print('Entering main loop')
             while self.running:
                 if self.last_update is not None:
                     diff = datetime.now() - self.last_update
-                    if diff.seconds < TIMEOUT:
+                    if diff.seconds > TIMEOUT:
                         self.logger.debug('No update received in over %d seconds' % TIMEOUT)
                         self._reconnect()
                 if datetime.now() > self.cutoff:
@@ -145,15 +146,16 @@ class Manager:
 
                 while not self.quotes.empty():
                     m = self.quotes.get()
-                    sym = m.symbol.lower()
+                    sym = m['symbol'].lower()
                     for bot in self.bots:
                         if sym in bot[0]:
-                            order = bot.process_quote(m)
+                            order = bot[1].process_quote(m)
                             if order is not None:
                                 self.client.place_order(order['transaction'],
                                                         order['instrument'],
                                                         order['quantity'],
                                                         order['order_type'],
+                                                        order['product'],
                                                         order['buy_price'],
                                                         None,
                                                         0,
@@ -168,7 +170,7 @@ class Manager:
                     sym = m.symbol.lower()
                     for bot in self.bots:
                         if sym in bot[0]:
-                            bot.process_order(m)
+                            bot[1].process_order(m)
                     self.orders.task_done()
 
                 while not self.trades.empty():
@@ -176,7 +178,7 @@ class Manager:
                     sym = m.symbol.lower()
                     for bot in self.bots:
                         if sym in bot[0]:
-                            bot.process_trade(m)
+                            bot[1].process_trade(m)
                     self.trades.task_done()
                 sleep(freq)
 

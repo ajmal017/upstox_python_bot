@@ -148,7 +148,19 @@ class Manager:
                     sym = m.symbol.lower()
                     for bot in self.bots:
                         if sym in bot[0]:
-                            bot.process_quote(m)
+                            order = bot.process_quote(m)
+                            if order is not None:
+                                self.client.place_order(order['transaction'],
+                                                        order['instrument'],
+                                                        order['quantity'],
+                                                        order['order_type'],
+                                                        order['buy_price'],
+                                                        None,
+                                                        0,
+                                                        api.DurationType.DAY,
+                                                        order['stoploss'],
+                                                        order['target'],
+                                                        1)
                     self.quotes.task_done()
 
                 while not self.orders.empty():

@@ -231,6 +231,7 @@ class Manager:
         self.logger.info('Websocket Disconnected')
 
     def _reconnect(self):
+        print("reconnecting")
         self.logger.info('Reconnecting websocket')
         for inst in self.subbed_stocks:
             try:

@@ -162,7 +162,7 @@ class Manager:
                                                         api.DurationType.DAY,
                                                         order['stoploss'],
                                                         order['target'],
-                                                        1)
+                                                        None)
                     self.quotes.task_done()
 
                 while not self.orders.empty():

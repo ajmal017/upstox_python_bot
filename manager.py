@@ -14,6 +14,7 @@ TIMEOUT = 10
 
 class Manager:
     def __init__(self, config_name, debug=False):
+        self._setup_logger(debug)
         if '.ini' not in config_name.lower()[-4:]:
             config_name = config_name + '.ini'
 
@@ -35,7 +36,6 @@ class Manager:
 
         self.subbed_stocks = []
         self.running = False
-        self._setup_logger(debug)
         
 
     def create_config_file(self):

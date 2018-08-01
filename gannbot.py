@@ -2,6 +2,7 @@ from bot import LinearBot
 from upstox_api import api as upstox
 from indicators import gann
 from utils import BUY, SELL
+from datetime import datetime
 
 DEFAULTS = {'buy': 4, 'target': -1, 'stoploss': 5}
 LOT_SIZE = 75
@@ -108,9 +109,10 @@ class GannBot(LinearBot):
         return order
 
     def _print_levels(self):
-        print('--------')
-        print('\nCalculated values for %s - ' % self.instrument.symbol)
-        print('Buy   - %f' % self.buy)
-        print('Sell  - %f' % self.target)
-        print('SL    - %f' % self.stoploss)
+        print('\n--------')
+        print(datetime.now().isoformat())
+        print('Calculated values for %s - ' % self.instrument.symbol)
+        print('\tBuy   - %f' % self.buy)
+        print('\tSell  - %f' % self.target)
+        print('\tSL    - %f' % self.stoploss)
         print('--------')

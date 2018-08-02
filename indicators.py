@@ -2,33 +2,36 @@ from math import sqrt
 from utils import round_off
 
 
-def ema(ohlc_arr, n=3):
+def ema(ohlc_arr, n=3, seed='sma'):
     '''
     ohlc_arr is any list of dicts with length > 3
-    dict must have following keys - 'open', 'high', 'low', 'close'
+    dict must have following keys - 'open', 'high', 'low', 'close', 'timestamp'
     '''
     if len(ohlc_arr) < n + 1:
         return None
-    c = 2 / float(len(ohlc_arr) + 1)
-    n = int(abs(n) * -1)
-    arr = ohlc_arr[n:]
-    ema_prev = 0.0
+
+    sorted_arr = sorted(ohlc_arr, key=lambda k: k['timestamp'])
+    c = 2 / float(n + 1)
+    arr = sorted_arr[-n:]
+    if seed == 'sma':
+        ema_prev = sma(sorted_arr[:-n])
+    else:
+        ema_prev = float(sorted_arr[-n - 1]['close'])
+
     ema = 0.0
-    for ohlc in arr[1:]:
+    for ohlc in arr:
         close = float(ohlc['close'])
-        if ema_prev == 0.0:
-            ema_prev = close
-        else:
-            ema_prev = ema
         ema = (close * c) + (ema_prev * (1 - c))
     return ema
 
 
 def sma(ohlc_arr):
     total = 0
+    if not ohlc_arr:
+        return total
     for ohlc in ohlc_arr:
         total += float(ohlc['close'])
-    return total / float(len(ohlc_arr))
+    return float(total / len(ohlc_arr))
 
 
 def gann(price=0, direction='up'):

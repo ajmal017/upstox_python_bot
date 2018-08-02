@@ -1,16 +1,33 @@
-from manager import Upstox_Manager
-from options import Gann
+from manager import Manager
+from niftyoptions import GannNiftyOptions
+import logging
+
+N50_SYMBOL = 'NIFTY_50'
+LOT_SIZE = 75
+
+l = logging.getLogger()
+l.setLevel(logging.ERROR)
+fh = logging.FileHandler('Errors.log')
+fh.setLevel(logging.ERROR)
+l.addHandler(fh)
 
 
 def main():
-    conf = input("Enter config file name: ")
-    conf += '.ini'
-    m = Upstox_Manager(conf)
+    m = Manager('config.ini')
     m.login_upstox()
-    g = Gann(m.client, True)
-    m.bots.append(g)
-    m.run()
+    o = GannNiftyOptions()
+    o.setup(m.client)
+    m.add_strategy(o)
+    m.main_loop()
+
+
+def test():
+    m = Manager('config.ini')
+    m.login_upstox()
+    import emats
+    e = emats.EMATS(debug=True)
+    e.setup(m.client)
 
 
 if __name__ == '__main__':
-    main()
+    test()

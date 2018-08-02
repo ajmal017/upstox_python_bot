@@ -2,9 +2,6 @@ from manager import Manager
 from niftyoptions import GannNiftyOptions
 import logging
 
-N50_SYMBOL = 'NIFTY_50'
-LOT_SIZE = 75
-
 l = logging.getLogger()
 l.setLevel(logging.ERROR)
 fh = logging.FileHandler('Errors.log')
@@ -30,4 +27,4 @@ def test():
 
 
 if __name__ == '__main__':
-    test()
+    main()

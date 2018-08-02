@@ -1,8 +1,7 @@
 from time import sleep
 from datetime import date, timedelta
 from upstox_api import api as upstox
-from utils import BUY, SELL, get_expiry_dates
-from logger import create_logger
+from utils import BUY, SELL, get_expiry_dates, create_logger
 from gannbot import GannBot
 
 
@@ -17,14 +16,12 @@ class GannNiftyOptions:
         self.running = False
         self.cycles = 0
         self.logger = create_logger(self.__class__.__name__)
+        self.state = []
 
         self.pe_bot = GannBot()
         self.pe_symbol = None
         self.ce_bot = GannBot()
         self.ce_symbol = None
-        self.state = []
-        self.logger.debug('===============================')
-        self.logger.debug('Init done')
 
     def setup(self, client=None):
         if 'setup complete' in self.state:
@@ -46,6 +43,7 @@ class GannNiftyOptions:
         else:
             self.logger.debug('Subscribed to %s' % self.ce_symbol)
             self.logger.debug('close = %f' % ce_inst.closing_price)
+            pass
 
         self._create_pe_symbol(client, nearest_100, exp)
         pe_inst = client.get_instrument_by_symbol('nse_fo', self.pe_symbol)
@@ -54,6 +52,7 @@ class GannNiftyOptions:
         else:
             self.logger.debug('Subscribed to %s' % self.pe_symbol)
             self.logger.debug('close = %f' % pe_inst.closing_price)
+            pass
 
         self.state.append('setup complete')
         self.logger.debug(self.state[-1])

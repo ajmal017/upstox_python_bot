@@ -1,7 +1,7 @@
 from bot import LinearBot
 from upstox_api import api as upstox
 from indicators import gann
-from utils import BUY, SELL
+from utils import BUY, SELL, round_off
 from datetime import datetime
 
 DEFAULTS = {'buy': 4, 'target': -1, 'stoploss': 5}
@@ -100,7 +100,7 @@ class GannBot(LinearBot):
     def _create_buy_order(self):
         order = {'transaction': upstox.TransactionType.Buy,
                  'instrument': self.instrument,
-                 'quantity': int(self.balance / (self.buy * LOT_SIZE)),
+                 'quantity': int(round_off(self.balance / self.buy, LOT_SIZE)),
                  'order_type': upstox.OrderType.Limit,
                  'product': upstox.ProductType.OneCancelsOther,
                  'buy_price': self.buy,

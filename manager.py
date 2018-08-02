@@ -1,9 +1,9 @@
 import os
 import configparser
-import logging
+from logging import DEBUG
 from queue import Queue
 from time import sleep
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from upstox_api import api
 from urllib3.exceptions import MaxRetryError
 import utils
@@ -14,7 +14,11 @@ TIMEOUT = 10
 
 class Manager:
     def __init__(self, config_name, debug=False):
-        self._setup_logger(debug)
+        if debug:
+            self.logger = utils.create_logger(self.__class__.__name__, True, DEBUG)
+        else:
+            self.logger = utils.create_logger(self.__class__.__name__, True)
+
         if '.ini' not in config_name.lower()[-4:]:
             config_name = config_name + '.ini'
 
@@ -22,6 +26,7 @@ class Manager:
         confPath = os.path.join(os.getcwd(), config_name)
         if not os.path.exists(confPath):
             self.create_config_file()
+            self.logger.debug('Created new config file')
 
         self.config = configparser.ConfigParser()
         self.config.read(config_name)
@@ -36,7 +41,6 @@ class Manager:
 
         self.subbed_stocks = []
         self.running = False
-        
 
     def create_config_file(self):
         conf = configparser.ConfigParser()
@@ -46,7 +50,7 @@ class Manager:
                             'last_login': '0'}
         with open(self.config_name, 'w') as cf:
             conf.write(cf)
-            self.logger.info("Created new config File")
+            self.logger.info("Updated config File")
 
     def login_upstox(self):
         creds = self.config['userinfo']
@@ -55,7 +59,7 @@ class Manager:
             self.logger.debug('Received new API key')
         if creds['secret'] == '0':
             creds['secret'] = input('Please enter the API secret - ')
-            self.logger.info('Received new API secret')
+            self.logger.debug('Received new API secret')
 
         tries = 0
         s = api.Session(creds['key'])
@@ -82,23 +86,19 @@ class Manager:
         if self.client is None:
             return
 
-        print('Loading master contracts')
+        self.logger.info('Loading master contracts')
         try:
             nse_fo = self.client.get_master_contract('nse_fo')
             if nse_fo:
-                print('NSE F&O loaded.')
-                self.logger.debug('NSE F&O loaded %d contracts' % len(nse_fo))
+                self.logger.info('NSE F&O loaded %d contracts' % len(nse_fo))
         except Exception as e:
-            self.logger.error('unable to load NSE_FO master contracts')
             self.logger.exception('Couldn\'nt load NSE_FO master contract')
         try:
             self.client.enabled_exchanges.append('nse_index')
             nse_index = self.client.get_master_contract('nse_index')
             if nse_index:
-                print('NSE Index loaded.')
-                self.logger.debug('NSE Index loaded %d contracts' % len(nse_fo))
+                self.logger.info('NSE Index loaded %d contracts' % len(nse_fo))
         except Exception as e:
-            self.logger.error('unable to load NSE_INDEX master contracts')
             self.logger.exception('Couldn\'nt load NSE_INDEX master contract')
 
         self.client.set_on_quote_update(self.quote_handler)
@@ -253,26 +253,4 @@ class Manager:
             except Exception as e:
                 pass
         self.client.start_websocket(True)
-
-    def _setup_logger(self, debug):
-        fn = date.today().strftime('%d-%m-%Y_root.log')
-        with open(fn, 'w'):
-            pass
-
-        logger = logging.getLogger()
-        self.logger = logger
-        fmt = logging.Formatter('[%(asctime)s ROOT] - %(levelname)s - %(message)s')
-
-        ch = logging.StreamHandler()
-        ch.setFormatter(fmt)
-        if debug:
-            ch.setLevel(logging.DEBUG)
-        else:
-            ch.setLevel(logging.INFO)
-        logger.addHandler(ch)
-
-        fh = logging.FileHandler(fn)
-        fh.setFormatter(fmt)
-        fh.setLevel(logging.DEBUG)
-        logger.addHandler(fh)
 

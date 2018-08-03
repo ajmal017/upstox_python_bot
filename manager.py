@@ -143,42 +143,50 @@ class Manager:
                     self._stop()
                     self.running = False
 
-                while not self.quotes.empty():
-                    m = self.quotes.get()
-                    sym = m['symbol'].lower()
-                    for bot in self.bots:
-                        if sym in bot[0]:
-                            order = bot[1].process_quote(m)
-                            if order is not None:
-                                self.client.place_order(order['transaction'],
-                                                        order['instrument'],
-                                                        order['quantity'],
-                                                        order['order_type'],
-                                                        order['product'],
-                                                        order['buy_price'],
-                                                        None,
-                                                        0,
-                                                        api.DurationType.DAY,
-                                                        order['stoploss'],
-                                                        order['target'],
-                                                        None)
-                    self.quotes.task_done()
+                try:
+                    while not self.quotes.empty():
+                        m = self.quotes.get()
+                        sym = m['symbol'].lower()
+                        for bot in self.bots:
+                            if sym in bot[0]:
+                                order = bot[1].process_quote(m)
+                                if order is not None:
+                                    self.client.place_order(order['transaction'],
+                                                            order['instrument'],
+                                                            order['quantity'],
+                                                            order['order_type'],
+                                                            order['product'],
+                                                            order['buy_price'],
+                                                            None,
+                                                            0,
+                                                            api.DurationType.DAY,
+                                                            order['stoploss'],
+                                                            order['target'],
+                                                            None)
+                        self.quotes.task_done()
+                except Exception as e:
+                    self.logger.exception('Exception while handling quote update.')
+                try:
+                    while not self.orders.empty():
+                        m = self.orders.get()
+                        sym = m['symbol'].lower()
+                        for bot in self.bots:
+                            if sym in bot[0]:
+                                bot[1].process_order(m)
+                        self.orders.task_done()
+                except Exception as e:
+                    self.logger.exception('Exception while handling trade update.')
 
-                while not self.orders.empty():
-                    m = self.orders.get()
-                    sym = m.symbol.lower()
-                    for bot in self.bots:
-                        if sym in bot[0]:
-                            bot[1].process_order(m)
-                    self.orders.task_done()
-
-                while not self.trades.empty():
-                    m = self.trades.get()
-                    sym = m.symbol.lower()
-                    for bot in self.bots:
-                        if sym in bot[0]:
-                            bot[1].process_trade(m)
-                    self.trades.task_done()
+                try:
+                    while not self.trades.empty():
+                        m = self.trades.get()
+                        sym = m['symbol'].lower()
+                        for bot in self.bots:
+                            if sym in bot[0]:
+                                bot[1].process_trade(m)
+                        self.trades.task_done()
+                except Exception as e:
+                    self.logger.exception('Exception while handling trade update.')
                 sleep(freq)
 
         except KeyboardInterrupt:

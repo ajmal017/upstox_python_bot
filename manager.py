@@ -166,7 +166,7 @@ class Manager:
 
                 while not self.orders.empty():
                     m = self.orders.get()
-                    sym = m.symbol.lower()
+                    sym = m['symbol'].lower()
                     for bot in self.bots:
                         if sym in bot[0]:
                             bot[1].process_order(m)
@@ -174,7 +174,7 @@ class Manager:
 
                 while not self.trades.empty():
                     m = self.trades.get()
-                    sym = m.symbol.lower()
+                    sym = m['symbol'].lower()
                     for bot in self.bots:
                         if sym in bot[0]:
                             bot[1].process_trade(m)

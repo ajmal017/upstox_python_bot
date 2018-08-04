@@ -87,20 +87,40 @@ class Manager:
             return
 
         self.logger.info('Loading master contracts')
+        self.client.enabled_exchanges.append('nse_index')
+        self.client.enabled_exchanges.append('nse_eq')
         try:
             nse_fo = self.client.get_master_contract('nse_fo')
             if nse_fo:
                 self.logger.info('NSE F&O loaded %d contracts' % len(nse_fo))
+                with open('nse_fo.txt', 'w') as f:
+                    for k in sorted(nse_fo.keys()):
+                        f.write(nse_fo[k].symbol.upper() + '\n')
         except Exception as e:
-            self.logger.exception('Couldn\'nt load NSE_FO master contract')
-        try:
-            self.client.enabled_exchanges.append('nse_index')
-            nse_index = self.client.get_master_contract('nse_index')
-            if nse_index:
-                self.logger.info('NSE Index loaded %d contracts' % len(nse_fo))
-        except Exception as e:
-            self.logger.exception('Couldn\'nt load NSE_INDEX master contract')
+            self.logger.exception('Couldn\'nt load NSE_FO master contracts')
 
+        try:
+            self.client.get_master_contract('nse_index')
+            nse_index = utils.get_master_contract_of_index('nse_index', self.client)
+            if nse_index:
+                self.logger.info('NSE Index loaded %d contracts' % len(nse_index))
+                with open('nse_index.txt', 'w') as f:
+                    for k in sorted(nse_index.keys()):
+                        f.write(nse_index[k].name.upper() + ' : ' +
+                                nse_index[k].symbol.upper() + '\n')
+        except Exception as e:
+            self.logger.exception('Couldn\'nt load NSE_INDEX master contracts')
+
+        try:
+            nse_eq = self.client.get_master_contract('nse_eq')
+            if nse_fo:
+                self.logger.info('NSE EQ loaded %d contracts' % len(nse_eq))
+                with open('nse_eq.txt', 'w') as f:
+                    for k in nse_eq.keys():
+                        f.write(nse_eq[k].name.upper() + ' : ' +
+                                nse_eq[k].symbol.upper() + '\n')
+        except Exception as e:
+            self.logger.exception('Couldn\'nt load NSE_EQ master contracts')
         self.client.set_on_quote_update(self.quote_handler)
         self.client.set_on_order_update(self.order_handler)
         self.client.set_on_trade_update(self.trade_handler)
@@ -165,7 +185,7 @@ class Manager:
                                                             None)
                         self.quotes.task_done()
                 except Exception as e:
-                    self.logger.exception('Exception while handling quote update.')
+                    self.logger.exception('Exception while handling order update.')
                 try:
                     while not self.orders.empty():
                         m = self.orders.get()

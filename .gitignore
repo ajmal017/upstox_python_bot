@@ -4,6 +4,7 @@
 *.txt
 *.pkl
 *.csv
+*.xlsx
 *.log
 *.swo
 

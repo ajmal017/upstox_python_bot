@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from upstox_api import api as upstox
 from utils import BUY, SELL, get_expiry_dates, create_logger
 from gannbot import GannBot
+from logging import DEBUG
 
 
 N50_SYMBOL = 'NIFTY_50'
@@ -11,13 +12,23 @@ LOT_SIZE = 75
 MAX_CYCLES = 2
 
 
-class GannNiftyOptions:
-    def __init__(self, debug=False):
+class GannOptions:
+    def __init__(self, instrument=None, debug=False, showinfo=False):
+        if debug:
+            self.logger = create_logger(self.__class__.__name__,
+                                        console=showinfo,
+                                        level=DEBUG)
+        else:
+            self.logger = create_logger(self.__class__.__name__,
+                                        console=showinfo)
         self.running = False
         self.cycles = 0
-        self.logger = create_logger(self.__class__.__name__)
         self.state = []
 
+        if instrument is None or not isinstance(instrument, upstox.Instrument):
+            self.logger.error('Invalid Instrument given in constructor.')
+            return
+        self.inst = instrument
         self.pe_bot = GannBot()
         self.pe_symbol = None
         self.ce_bot = GannBot()
@@ -31,8 +42,7 @@ class GannNiftyOptions:
         exp = get_expiry_dates(tod.month)[-1]
         if exp - tod < timedelta(days=6):
             exp = get_expiry_dates(tod.month + 1)[-1]
-        nifty = client.get_instrument_by_symbol('nse_index', N50_SYMBOL)
-        data = client.get_live_feed(nifty, upstox.LiveFeedType.Full)
+        data = client.get_live_feed(self.inst, upstox.LiveFeedType.Full)
         nearest_100 = int(float(data['close']) / 100) * 100
         self.logger.debug('Base price for options = %d' % nearest_100)
 
